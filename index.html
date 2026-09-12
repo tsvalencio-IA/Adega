@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#16090d">
+  <meta name="description" content="Adega EID VALÊNCIO — gestão inteligente da adega, histórico, degustações e sommelier IA.">
+  <title>Adega EID VALÊNCIO</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+  <div class="app-bg" aria-hidden="true"></div>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <button class="brand" data-route="home" aria-label="Início">
+        <span class="brand-mark">A</span>
+        <span><strong>Adega EID VALÊNCIO</strong><small>Private Cellar Intelligence</small></span>
+      </button>
+      <div class="top-actions">
+        <span id="sync-pill" class="status-pill"><i></i><span>Conectando</span></span>
+        <button id="settings-btn" class="icon-btn" aria-label="Configurações">⚙</button>
+      </div>
+    </header>
+
+    <main id="main-content" class="main-content">
+      <section id="page-home" class="page active" data-page="home">
+        <div class="hero-card">
+          <div>
+            <small>VISÃO DA ADEGA</small>
+            <h1>Seu acervo, organizado e inteligente.</h1>
+            <p id="hero-subtitle">Carregando sua adega...</p>
+          </div>
+          <button class="primary-btn compact" data-action="add-wine">＋ Adicionar vinho</button>
+        </div>
+        <div id="stats-grid" class="stats-grid"></div>
+        <div class="section-head"><div><small>ATALHOS</small><h2>Ações rápidas</h2></div></div>
+        <div class="quick-grid">
+          <button class="quick-card" data-action="scan-wine"><span>📷</span><strong>Escanear rótulo</strong><small>Identificação assistida por IA</small></button>
+          <button class="quick-card" data-action="open-dinner"><span>🍽</span><strong>Harmonizar refeição</strong><small>Somente com o estoque real</small></button>
+          <button class="quick-card" data-route="visual"><span>🗄</span><strong>Adega visual</strong><small>Prateleiras e posições</small></button>
+          <button class="quick-card" data-route="journal"><span>📖</span><strong>Diário da adega</strong><small>Consumos, notas e eventos</small></button>
+        </div>
+        <div class="section-head"><div><small>INTELIGÊNCIA</small><h2>O que merece atenção</h2></div></div>
+        <div id="insights" class="insight-grid"></div>
+        <div class="section-head"><div><small>PERFIL DO ACERVO</small><h2>Distribuição</h2></div></div>
+        <div id="distribution" class="distribution-card"></div>
+      </section>
+
+      <section id="page-cellar" class="page" data-page="cellar">
+        <div class="page-title"><div><small>INVENTÁRIO</small><h1>Minha adega</h1></div><button class="primary-btn compact" data-action="add-wine">＋ Novo</button></div>
+        <div class="toolbar">
+          <label class="search-box">⌕<input id="wine-search" type="search" placeholder="Buscar rótulo, uva, região, país..."></label>
+          <button id="filters-btn" class="secondary-btn">Filtros</button>
+        </div>
+        <div id="active-filters" class="filter-chips"></div>
+        <div id="wine-grid" class="wine-grid"></div>
+        <div id="wine-empty" class="empty-state hidden"><span>🍷</span><h3>Nenhum vinho encontrado</h3><p>Cadastre um rótulo ou ajuste os filtros.</p></div>
+      </section>
+
+      <section id="page-visual" class="page" data-page="visual">
+        <div class="page-title"><div><small>LOCALIZAÇÃO</small><h1>Adega visual</h1><p id="visual-subtitle">Prateleiras e posições reais das garrafas.</p></div></div>
+        <div id="visual-cellar" class="visual-cellar"></div>
+        <div class="section-head"><div><small>SEM POSIÇÃO</small><h2>Garrafas a organizar</h2></div></div>
+        <div id="unplaced-list" class="unplaced-list"></div>
+      </section>
+
+      <section id="page-journal" class="page" data-page="journal">
+        <div class="page-title"><div><small>MEMÓRIA DA ADEGA</small><h1>Diário</h1></div></div>
+        <div class="segmented" id="journal-tabs">
+          <button class="active" data-journal="movements">Movimentos</button>
+          <button data-journal="tastings">Degustações</button>
+          <button data-journal="wishlist">Desejos</button>
+          <button data-journal="events">Eventos</button>
+        </div>
+        <div id="journal-content"></div>
+      </section>
+
+      <section id="page-ai" class="page" data-page="ai">
+        <div class="page-title"><div><small>SOMMELIER DA ADEGA</small><h1>Inteligência com contexto real</h1><p>A IA recebe o estoque cadastrado e não pode inventar o que existe na sua adega.</p></div></div>
+        <div class="ai-actions">
+          <button class="quick-card" data-action="ai-suggest"><span>✨</span><strong>Escolha ideal</strong><small>Uma opção do estoque para hoje</small></button>
+          <button class="quick-card" data-action="open-dinner"><span>🍽</span><strong>Planejar refeição</strong><small>Pratos, pessoas e garrafas disponíveis</small></button>
+        </div>
+        <div class="chat-card">
+          <div id="ai-status" class="ai-status">Verificando backend da IA...</div>
+          <div id="chat-messages" class="chat-messages"></div>
+          <form id="chat-form" class="chat-form">
+            <input id="chat-input" autocomplete="off" placeholder="Ex.: qual vinho tenho para um churrasco?">
+            <button type="submit" aria-label="Enviar">➤</button>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer class="signature">Powered by <strong>thIAguinho Soluções Digitais</strong></footer>
+
+    <nav class="bottom-nav" aria-label="Navegação principal">
+      <button class="active" data-route="home"><span>⌂</span><small>Início</small></button>
+      <button data-route="cellar"><span>🍷</span><small>Adega</small></button>
+      <button class="nav-fab" data-action="add-wine" aria-label="Adicionar vinho"><span>＋</span></button>
+      <button data-route="journal"><span>◴</span><small>Diário</small></button>
+      <button data-route="ai"><span>✦</span><small>Sommelier</small></button>
+    </nav>
+  </div>
+
+  <div id="modal-backdrop" class="modal-backdrop hidden"></div>
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true"><div id="modal-sheet" class="modal-sheet"></div></div>
+  <div id="loading" class="loading hidden"><div class="loader-ring"></div><strong id="loading-text">Processando...</strong></div>
+  <div id="toast" class="toast hidden"></div>
+
+  <input id="camera-input" hidden type="file" accept="image/*" capture="environment">
+  <input id="gallery-input" hidden type="file" accept="image/*">
+  <input id="backup-input" hidden type="file" accept="application/json,.json">
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
