@@ -1,25 +1,9 @@
 import { APP_CONFIG } from './config.js';
 import { getState } from './store.js';
+import { answerFromTruth, buildTruthContext } from './truth-engine.js';
 
-function cellarContextForAI() {
-  const state = getState();
-  const inventory = state.wines.filter(w => w.quantity > 0).map(w => ({
-    id: w.id, wineName: w.wineName, producer: w.producer, grape: w.grape, region: w.region,
-    country: w.country, year: w.year, type: w.type, quantity: w.quantity,
-    description: w.description, favorite: w.favorite, purchasePrice: w.purchasePrice || 0,
-    locations: w.bottles.filter(b => b.status === 'stored').map(b => b.location).filter(Boolean)
-  }));
-  const tastings = (state.v2.tastings || []).slice(0, 40).map(t => ({
-    at: t.at, wineId: t.wineId, wineName: t.wineName, year: t.year || '', rating: t.rating || 0,
-    food: t.food || '', occasion: t.occasion || '', companions: t.companions || '', notes: t.notes || ''
-  }));
-  const wishlist = (state.v2.wishlist || []).slice(0, 30).map(w => ({
-    wineName: w.wineName || '', producer: w.producer || '', year: w.year || '', notes: w.notes || ''
-  }));
-  const events = (state.v2.events || []).slice(0, 25).map(e => ({
-    title: e.title || '', date: e.date || '', people: e.people || 0, meal: e.meal || '', status: e.status || ''
-  }));
-  return { inventory, tastings, wishlist, events };
+function cellarContextForAI(message = '') {
+  return buildTruthContext(message, getState(), 250);
 }
 
 async function request(payload) {
@@ -48,17 +32,19 @@ export async function scanLabel(base64, mimeType = 'image/jpeg') {
 }
 
 export async function askSommelier(message, history = []) {
-  return request({ mode: 'chat', message, history: history.slice(-8), context: cellarContextForAI() });
+  const exact = answerFromTruth(message, getState());
+  if (exact.handled) return { ok: true, text: exact.text, source: exact.source, certainty: exact.certainty, evidence: exact.evidence };
+  return request({ mode: 'chat', message, history: history.slice(-8), context: cellarContextForAI(message) });
 }
 export async function getSuggestion(context = '') {
-  return request({ mode: 'suggest', message: context, context: cellarContextForAI() });
+  return request({ mode: 'suggest', message: context, context: cellarContextForAI(context) });
 }
 export async function getTechSheet(wine) {
-  return request({ mode: 'tech_sheet', wine, context: cellarContextForAI() });
+  return request({ mode: 'tech_sheet', wine, context: cellarContextForAI(wine?.wineName || '') });
 }
 export async function getPairing(wine, details) {
-  return request({ mode: 'pairing', wine, message: details, context: cellarContextForAI() });
+  return request({ mode: 'pairing', wine, message: details, context: cellarContextForAI(`${wine?.wineName || ''} ${details || ''}`) });
 }
 export async function planDinner(details) {
-  return request({ mode: 'dinner', message: details, context: cellarContextForAI() });
+  return request({ mode: 'dinner', message: details, context: cellarContextForAI(details) });
 }
