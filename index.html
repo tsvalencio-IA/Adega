@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#16090d">
   <meta name="description" content="Adega EID VALÊNCIO — gestão inteligente da adega, histórico, degustações e sommelier IA.">
+  <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
   <title>Adega EID VALÊNCIO</title>
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
@@ -13,7 +14,22 @@
 </head>
 <body>
   <div class="app-bg" aria-hidden="true"></div>
-  <div id="app" class="app-shell">
+  <section id="auth-gate" class="auth-gate" aria-live="polite">
+    <div class="auth-card">
+      <div class="auth-brand"><span class="auth-mark">A</span><div><small>ACESSO PRIVADO</small><h1>Adega EID VALÊNCIO</h1><p>Seu acervo, histórico e Sommelier protegidos por Firebase Authentication.</p></div></div>
+      <form id="auth-form" class="auth-form">
+        <label>E-mail autorizado<input id="auth-email" type="email" autocomplete="username" inputmode="email" required placeholder="seu@email.com"></label>
+        <label>Senha<input id="auth-password" type="password" autocomplete="current-password" required placeholder="••••••••"></label>
+        <button class="primary-btn auth-submit" type="submit">Entrar na adega</button>
+        <button id="auth-reset" class="ghost-btn auth-reset" type="button">Esqueci minha senha</button>
+      </form>
+      <div id="auth-message" class="auth-message">Verificando sessão segura...</div>
+      <div class="auth-security"><span>🔒</span><p>Não existe cadastro público. Somente usuários criados e autorizados no Firebase podem abrir esta adega.</p></div>
+      <div class="auth-signature">Powered by <strong>thIAguinho Soluções Digitais</strong></div>
+    </div>
+  </section>
+
+  <div id="app" class="app-shell hidden">
     <header class="topbar">
       <button class="brand" data-route="home" aria-label="Início">
         <span class="brand-mark">A</span>
