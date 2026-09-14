@@ -1,0 +1,29 @@
+/* Adega EID VALÊNCIO PRO v2.1 — armário físico real
+   Uma única prateleira, 5 posições por fileira: 1–5, 6–10, 11–15... */
+.shelf-slots{
+  grid-template-columns:repeat(5,minmax(0,1fr))!important;
+  gap:8px!important;
+  overflow:visible!important;
+}
+.slot{min-width:0!important;height:108px;padding:12px 5px 6px}
+.shelf-title span:first-child{font-size:0}
+.shelf-title span:first-child::after{content:"Prateleira única";font-size:10px}
+#visual-subtitle{font-size:0}
+#visual-subtitle::after{
+  content:"Armário principal · prateleira única · 5 posições por fileira";
+  font-size:11px;color:var(--muted)
+}
+.field:has(#s-shelves),.field:has(#s-slots){display:none!important}
+#discover-cloud{display:none!important}
+@media(max-width:620px){
+  .visual-cellar{padding:10px}
+  .shelf-slots{gap:5px!important}
+  .slot{height:88px;border-radius:11px;padding:12px 3px 4px}
+  .slot .bottle{font-size:20px}
+  .slot strong,.slot small{font-size:7px}
+}
+@media(max-width:380px){
+  .visual-cellar{padding:8px}
+  .shelf-slots{gap:4px!important}
+  .slot{height:82px;padding-left:2px;padding-right:2px}
+}
