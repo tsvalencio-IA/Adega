@@ -1,4 +1,4 @@
-import { db, adegaRef, metaRef, doc, getDoc, onSnapshot, runTransaction } from './firebase.js';
+import { db, adegaRef, doc, getDoc, onSnapshot, runTransaction } from './firebase.js';
 import { APP_CONFIG } from './config.js';
 import { fingerprint, nowISO, safeNumber, uid } from './utils.js';
 
@@ -54,8 +54,6 @@ export function normalizeWine(w = {}, i = 0) {
       purchasePlace: w.purchasePlace || ''
     }, id, bottles.length));
   } else if (stored.length > quantity) {
-    // A versão legada consegue reduzir `quantity` sem conhecer bottles[].
-    // Reconciliamos somente o excedente para a tela PRO nunca mostrar mais garrafas que o estoque oficial.
     stored.slice(quantity).forEach(b => { b.status = 'legacy_adjusted_out'; });
   }
   return {
@@ -87,13 +85,14 @@ export function normalizeWine(w = {}, i = 0) {
 
 function defaults() {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     movements: [], tastings: [], wishlist: [], events: [],
     settings: {
       profileName: APP_CONFIG.defaults.profileName,
-      cellarName: APP_CONFIG.defaults.cellarName,
-      shelves: [...APP_CONFIG.defaults.shelves],
-      slotsPerShelf: APP_CONFIG.defaults.slotsPerShelf,
+      cellarName: 'Armário principal',
+      layoutMode: 'single_shelf',
+      columns: 5,
+      shelfName: 'Prateleira única',
       cloudinary: { ...APP_CONFIG.cloudinary },
       appLock: false
     },
@@ -103,13 +102,15 @@ function defaults() {
 
 export function normalizeDocument(data = {}, meta = {}) {
   const base = defaults();
-  // Compatibilidade de transição: lê v2 do documento PRO; se uma versão de teste antiga tiver v2 no legado, também recupera.
   const v2Source = meta?.v2 && typeof meta.v2 === 'object' ? meta.v2 : (data.v2 && typeof data.v2 === 'object' ? data.v2 : {});
   const v2 = v2Source;
   const settings = { ...base.settings, ...(v2.settings || {}) };
   settings.cloudinary = { ...base.settings.cloudinary, ...(v2.settings?.cloudinary || {}) };
-  settings.shelves = Array.isArray(settings.shelves) && settings.shelves.length ? settings.shelves : base.settings.shelves;
-  settings.slotsPerShelf = Math.max(1, Math.min(20, Math.floor(safeNumber(settings.slotsPerShelf, base.settings.slotsPerShelf))));
+  settings.layoutMode = 'single_shelf';
+  settings.columns = 5;
+  settings.shelfName = settings.shelfName || 'Prateleira única';
+  delete settings.shelves;
+  delete settings.slotsPerShelf;
   return {
     wines: (Array.isArray(data.estoque) ? data.estoque : []).map(normalizeWine),
     v2: {
@@ -124,8 +125,7 @@ export function normalizeDocument(data = {}, meta = {}) {
   };
 }
 
-function legacySerializable(s) { return { estoque: s.wines }; }
-function metaSerializable(s) { return { v2: s.v2 }; }
+function legacySerializable(s) { return { estoque: s.wines, v2: s.v2 }; }
 
 function notify() { listeners.forEach(fn => fn(state)); }
 export function getState() { return state; }
@@ -133,90 +133,36 @@ export function subscribe(fn) { listeners.add(fn); fn(state); return () => liste
 
 export function startRealtime() {
   if (unsubscribe) return unsubscribe;
-  let legacyData = {};
-  let metaData = readLocalMeta();
-  let legacyReady = false;
-  const emit = () => {
-    // O estoque legado é a fonte de verdade do inventário. Se as Rules não liberarem o doc PRO,
-    // os recursos avançados caem para armazenamento local em vez de bloquear o estoque.
-    if (!legacyReady) return;
-    const effectiveMeta = metaMode === 'local' ? readLocalMeta() : metaData;
-    state = normalizeDocument(legacyData, effectiveMeta);
+  unsubscribe = onSnapshot(adegaRef, snap => {
+    const legacyData = snap.exists() ? snap.data() : {};
+    const localBackup = readLocalMeta();
+    state = normalizeDocument(legacyData, legacyData?.v2 ? {} : localBackup);
+    metaMode = 'firebase';
+    if (state.v2) writeLocalMeta(state.v2);
     notify();
-  };
-  const offLegacy = onSnapshot(adegaRef, snap => {
-    legacyReady = true;
-    legacyData = snap.exists() ? snap.data() : {};
-    emit();
   }, err => {
-    console.error('[ADEGA] Firestore estoque listener:', err);
+    console.error('[ADEGA] Firestore listener:', err);
+    metaMode = 'local';
+    state = normalizeDocument(state.raw?.legacy || {}, readLocalMeta());
     listeners.forEach(fn => fn(state, err));
   });
-  const offMeta = onSnapshot(metaRef, snap => {
-    metaMode = 'firebase';
-    metaData = snap.exists() ? snap.data() : readLocalMeta();
-    if (snap.exists() && metaData?.v2) writeLocalMeta(metaData.v2);
-    emit();
-  }, err => {
-    console.warn('[ADEGA] Documento PRO sem acesso; usando fallback local:', err?.code || err?.message);
-    metaMode = 'local';
-    metaData = readLocalMeta();
-    emit();
-  });
-  unsubscribe = () => { offLegacy(); offMeta(); };
   return unsubscribe;
 }
 
-function isMetaPermissionError(error) {
-  const code = String(error?.code || '');
-  return code.includes('permission-denied') || code.includes('unauthenticated');
-}
-
-async function transactLocalFallback(mutator) {
-  let localV2 = readLocalMeta();
-  let finalState;
+async function transact(mutator) {
+  let finalV2 = null;
   const result = await runTransaction(db, async tx => {
     const legacySnap = await tx.get(adegaRef);
-    const s = normalizeDocument(legacySnap.exists() ? legacySnap.data() : {}, localV2);
+    const data = legacySnap.exists() ? legacySnap.data() : {};
+    const s = normalizeDocument(data, data?.v2 ? {} : readLocalMeta());
     const value = await mutator(s);
     s.v2.updatedAt = nowISO();
     tx.set(adegaRef, legacySerializable(s), { merge: true });
-    finalState = s;
+    finalV2 = s.v2;
     return value;
   });
-  if (finalState) {
-    metaMode = 'local';
-    writeLocalMeta(finalState.v2);
-    state = normalizeDocument(legacySerializable(finalState), { v2: finalState.v2 });
-    notify();
-  }
+  if (finalV2) writeLocalMeta(finalV2);
   return result;
-}
-
-async function transact(mutator) {
-  if (metaMode === 'local') return transactLocalFallback(mutator);
-  try {
-    return await runTransaction(db, async tx => {
-      // Leitura sequencial intencional: todas as leituras acontecem antes das gravações.
-      const legacySnap = await tx.get(adegaRef);
-      const metaSnap = await tx.get(metaRef);
-      const s = normalizeDocument(
-        legacySnap.exists() ? legacySnap.data() : {},
-        metaSnap.exists() ? metaSnap.data() : {}
-      );
-      const result = await mutator(s);
-      s.v2.updatedAt = nowISO();
-      tx.set(adegaRef, legacySerializable(s), { merge: true });
-      tx.set(metaRef, metaSerializable(s), { merge: true });
-      writeLocalMeta(s.v2);
-      return result;
-    });
-  } catch (error) {
-    if (!isMetaPermissionError(error)) throw error;
-    console.warn('[ADEGA] Rules não autorizaram documento PRO; operação seguirá com V2 local.', error?.code || error?.message);
-    metaMode = 'local';
-    return transactLocalFallback(mutator);
-  }
 }
 
 function actor(s) { return s.v2.settings.profileName || 'Usuário da adega'; }
@@ -247,6 +193,7 @@ export async function addWine(info, quantity = 1) {
       w = normalizeWine({ ...info, id: uid('wine'), quantity, createdAt: nowISO(), updatedAt: nowISO(), bottles: [] }, s.wines.length);
       ensureStoredBottles(w); s.wines.push(w);
     }
+    normalizeLayoutInState(s, false);
     movement(s, { type: 'entrada', wineId: w.id, wineName: w.wineName, quantity, detail: 'Entrada de garrafa(s)' });
     return w.id;
   });
@@ -285,6 +232,7 @@ export async function adjustQuantity(wineId, delta, details = {}) {
       w.quantity -= removeCount;
       movement(s, { type: details.type || 'saida', wineId: w.id, wineName: w.wineName, quantity: -removeCount, detail: details.detail || 'Ajuste negativo de estoque' });
     }
+    normalizeLayoutInState(s, false);
     w.updatedAt = nowISO();
   });
 }
@@ -305,6 +253,73 @@ export async function openBottle(wineId, tasting = null) {
   });
 }
 
+function numericPosition(value) {
+  const raw = String(value ?? '').trim().replace(/^P/i, '');
+  if (!/^\d+$/.test(raw)) return 0;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : 0;
+}
+
+function refreshWinePrimaryLocation(w) {
+  const first = w.bottles
+    .filter(x => x.status === 'stored' && numericPosition(x.location))
+    .sort((a, b) => numericPosition(a.location) - numericPosition(b.location))[0];
+  w.location = first ? String(numericPosition(first.location)) : '';
+}
+
+function normalizeLayoutInState(s, force = false) {
+  const entries = [];
+  s.wines.forEach(w => {
+    ensureStoredBottles(w);
+    w.bottles.filter(b => b.status === 'stored').forEach(b => entries.push({ w, b }));
+  });
+
+  let changed = false;
+  const used = new Set();
+  if (force) {
+    entries.forEach(({ b }) => { if (b.location) changed = true; b.location = ''; });
+  } else {
+    entries.forEach(({ b }) => {
+      const pos = numericPosition(b.location);
+      if (!pos || used.has(pos)) {
+        if (b.location) changed = true;
+        b.location = '';
+      } else {
+        const normalized = String(pos);
+        if (b.location !== normalized) changed = true;
+        b.location = normalized;
+        used.add(pos);
+      }
+    });
+  }
+
+  let next = 1;
+  entries.forEach(({ b }) => {
+    if (numericPosition(b.location)) return;
+    while (used.has(next)) next += 1;
+    b.location = String(next);
+    used.add(next);
+    changed = true;
+    next += 1;
+  });
+
+  s.wines.forEach(refreshWinePrimaryLocation);
+  return changed;
+}
+
+export async function ensureSequentialLayout(force = false) {
+  return transact(s => {
+    const changed = normalizeLayoutInState(s, force);
+    if (changed) {
+      movement(s, {
+        type: 'localizacao', wineId: '', wineName: '', quantity: 0,
+        detail: `Armário reorganizado em ordem sequencial (5 por fileira)`
+      });
+    }
+    return changed;
+  });
+}
+
 export async function assignBottleLocation(wineId, bottleId, location) {
   return transact(s => {
     const w = s.wines.find(x => x.id === String(wineId));
@@ -312,10 +327,32 @@ export async function assignBottleLocation(wineId, bottleId, location) {
     ensureStoredBottles(w);
     const b = w.bottles.find(x => x.id === String(bottleId));
     if (!b || b.status !== 'stored') throw new Error('Garrafa não disponível.');
-    const previous = b.location || 'sem posição';
-    b.location = location || '';
-    w.location = w.bottles.find(x => x.status === 'stored' && x.location)?.location || w.location || '';
-    movement(s, { type: 'localizacao', wineId: w.id, wineName: w.wineName, bottleId: b.id, quantity: 0, detail: `${previous} → ${location || 'sem posição'}` });
+
+    const targetPos = numericPosition(location);
+    const target = targetPos ? String(targetPos) : '';
+    const previousPos = numericPosition(b.location);
+    const previous = previousPos ? String(previousPos) : '';
+
+    if (target) {
+      for (const otherWine of s.wines) {
+        ensureStoredBottles(otherWine);
+        const occupant = otherWine.bottles.find(x =>
+          x.status === 'stored' && x.id !== b.id && numericPosition(x.location) === targetPos
+        );
+        if (occupant) {
+          occupant.location = previous;
+          refreshWinePrimaryLocation(otherWine);
+          break;
+        }
+      }
+    }
+
+    b.location = target;
+    refreshWinePrimaryLocation(w);
+    movement(s, {
+      type: 'localizacao', wineId: w.id, wineName: w.wineName, bottleId: b.id, quantity: 0,
+      detail: `${previous ? `posição ${previous}` : 'sem posição'} → ${target ? `posição ${target}` : 'sem posição'}`
+    });
   });
 }
 
@@ -358,8 +395,11 @@ export async function saveSettings(patch) {
     const current = s.v2.settings;
     const next = { ...current, ...patch };
     if (patch.cloudinary) next.cloudinary = { ...current.cloudinary, ...patch.cloudinary };
-    if (patch.shelves) next.shelves = patch.shelves.filter(Boolean).slice(0, 12);
-    if (patch.slotsPerShelf != null) next.slotsPerShelf = Math.max(1, Math.min(20, Math.floor(safeNumber(patch.slotsPerShelf, current.slotsPerShelf))));
+    next.layoutMode = 'single_shelf';
+    next.columns = 5;
+    next.shelfName = String(next.shelfName || 'Prateleira única').trim() || 'Prateleira única';
+    delete next.shelves;
+    delete next.slotsPerShelf;
     s.v2.settings = next;
   });
 }
@@ -371,11 +411,12 @@ export async function replaceFromBackup(backup) {
   return transact(s => {
     s.wines = incoming.wines;
     s.v2 = { ...incoming.v2, updatedAt: nowISO() };
+    normalizeLayoutInState(s, false);
     movement(s, { type: 'importacao', wineId: '', wineName: '', quantity: 0, detail: 'Backup JSON importado' });
   });
 }
 
-export function backupObject() { return { exportedAt: nowISO(), appVersion: APP_CONFIG.version, firebaseProject: APP_CONFIG.firebase.projectId, legacyDocument: APP_CONFIG.adegaId, proDocument: APP_CONFIG.metaDocId, estoque: state.wines, v2: state.v2 }; }
+export function backupObject() { return { exportedAt: nowISO(), appVersion: APP_CONFIG.version, firebaseProject: APP_CONFIG.firebase.projectId, document: APP_CONFIG.adegaId, estoque: state.wines, v2: state.v2 }; }
 
 export async function discoverCloudinaryFromFirebase() {
   const paths = [
