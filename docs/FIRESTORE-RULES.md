@@ -1,52 +1,53 @@
-# Firestore Rules — compatibilidade
+# Firestore Rules — modo profissional
 
-O código **não altera suas Rules automaticamente**. Isso é intencional: sobrescrever regras existentes poderia quebrar outros projetos que usam o mesmo Firebase `valencio-app`.
-
-A versão PRO usa dois documentos da coleção `adegas`:
+As regras antigas eram:
 
 ```text
-adegas/adega-compartilhada
-adegas/adega-compartilhada-pro-v2
+allow read, write: if true;
 ```
 
-## Se sua regra atual já usa wildcard
+Isso significa que qualquer pessoa que conhecesse o projeto poderia ler, alterar ou apagar o estoque diretamente pela API. A versão 2.1.0 remove esse acesso público.
 
-Exemplo estrutural:
+## 1. Ative o Firebase Authentication
+
+Firebase Console → **Authentication** → **Começar** → **Sign-in method** → habilite **E-mail/senha**.
+
+## 2. Crie o proprietário
+
+Em **Authentication → Users → Add user**, crie o usuário que terá acesso à adega. Copie o **UID** gerado.
+
+## 3. Crie o documento de autorização
+
+No Firestore crie:
 
 ```text
-match /adegas/{adegaId} {
-  ...sua regra atual...
-}
+Coleção: adegaConfig
+Documento: access
+Campo: ownerUids
+Tipo: array
+Valor: ["UID_DO_PROPRIETARIO"]
 ```
 
-Nesse caso, o segundo documento normalmente já cai na mesma regra e nenhuma mudança é necessária.
+Para mais de uma pessoa, adicione todos os UIDs no mesmo array.
 
-## Se sua regra libera apenas o documento antigo
+## 4. Publique as regras
 
-Se existir algo específico como:
+Abra **Firestore Database → Regras**, substitua pelas regras do arquivo `firestore.rules` e clique em **Publicar**.
+
+## 5. Domínio autorizado
+
+Em **Authentication → Settings → Authorized domains**, adicione o domínio de produção da Vercel, por exemplo:
 
 ```text
-match /adegas/adega-compartilhada {
-  ...
-}
+adega-snowy-six.vercel.app
 ```
 
-copie **a mesma condição de acesso que você já usa** para:
+## O que passa a ser protegido
 
-```text
-match /adegas/adega-compartilhada-pro-v2 {
-  ...a mesma condição de acesso aprovada por você...
-}
-```
+- estoque legado;
+- documento PRO;
+- histórico e degustações;
+- configurações;
+- acesso ao endpoint Gemini.
 
-Não use `allow read, write: if true` apenas para fazer o app funcionar em produção. Como este Firebase pode ser compartilhado com outros projetos, ajuste somente os caminhos necessários e preserve o restante das Rules.
-
-## Fallback automático
-
-Se o documento PRO não puder ser lido/escrito, o aplicativo:
-
-- continua lendo e gravando o `estoque` no documento antigo;
-- mantém diário/configurações avançadas em armazenamento local do navegador;
-- mostra um aviso em Configurações de que os dados PRO não estão sincronizando entre aparelhos.
-
-Assim uma Rule restritiva não impede o uso do estoque atual.
+A API `/api/ai` usa o token do usuário e consulta `adegaConfig/access`; portanto uma pessoa autenticada mas não autorizada também não consegue consumir sua chave Gemini.
