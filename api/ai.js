@@ -1,6 +1,27 @@
 const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_KEY || '';
 
+const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'valencio-app';
+const ACCESS_DOCUMENT = process.env.ADEGA_ACCESS_DOCUMENT || 'adegaConfig/access';
+
+function httpError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+async function authorizeOwner(req) {
+  const header = String(req.headers?.authorization || '');
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  if (!token) throw httpError(401, 'Sessão não autenticada.');
+  const encodedPath = ACCESS_DOCUMENT.split('/').map(encodeURIComponent).join('/');
+  const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(FIREBASE_PROJECT_ID)}/databases/(default)/documents/${encodedPath}`;
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
+  if (response.status === 401) throw httpError(401, 'Sessão inválida ou expirada.');
+  if (!response.ok) throw httpError(403, 'Usuário autenticado, mas não autorizado para esta adega.');
+  return true;
+}
+
 function send(res, status, body) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -77,9 +98,10 @@ async function geminiCall({ prompt, imageBase64, mimeType, jsonMode }) {
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
-  if (req.method === 'GET') return send(res, 200, { ok: true, configured: Boolean(API_KEY), model: MODEL });
-  if (req.method !== 'POST') return send(res, 405, { error: 'Método não permitido.' });
+  if (!['GET','POST'].includes(req.method)) return send(res, 405, { error: 'Método não permitido.' });
   try {
+    await authorizeOwner(req);
+    if (req.method === 'GET') return send(res, 200, { ok: true, configured: Boolean(API_KEY), model: MODEL, protected: true });
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
     const mode = String(body.mode || 'chat');
     if (mode === 'scan') {
@@ -95,6 +117,6 @@ export default async function handler(req, res) {
     const text = await geminiCall({ prompt, jsonMode: false });
     return send(res, 200, { ok: true, text });
   } catch (e) {
-    return send(res, 500, { error: e?.message || 'Falha na IA.' });
+    return send(res, Number(e?.status) || 500, { error: e?.message || 'Falha na IA.' });
   }
 }
