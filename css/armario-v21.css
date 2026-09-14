@@ -9,10 +9,17 @@
 .shelf-title span:first-child{font-size:0}
 .shelf-title span:first-child::after{content:"Prateleira única";font-size:10px}
 #visual-subtitle{font-size:0}
-#visual-subtitle::after{
-  content:"Armário principal · prateleira única · 5 posições por fileira";
-  font-size:11px;color:var(--muted)
-}
+#visual-subtitle::after{content:"Armário principal · prateleira única · 5 posições por fileira";font-size:11px;color:var(--muted)}
+#page-visual .page-title h1{font-size:0}
+#page-visual .page-title h1::after{content:"Armário visual";font-size:34px}
+.quick-card[data-route="visual"] strong{font-size:0}
+.quick-card[data-route="visual"] strong::after{content:"Armário visual";font-size:14px}
+.quick-card[data-route="visual"] small{font-size:0}
+.quick-card[data-route="visual"] small::after{content:"Prateleira única · ordem real";font-size:10px}
+#page-visual .section-head small{font-size:0}
+#page-visual .section-head small::after{content:"ORDEM DO ARMÁRIO";font-size:9px}
+#page-visual .section-head h2{font-size:0}
+#page-visual .section-head h2::after{content:"Organização física";font-size:18px}
 .field:has(#s-shelves),.field:has(#s-slots){display:none!important}
 #discover-cloud{display:none!important}
 @media(max-width:620px){
@@ -21,6 +28,7 @@
   .slot{height:88px;border-radius:11px;padding:12px 3px 4px}
   .slot .bottle{font-size:20px}
   .slot strong,.slot small{font-size:7px}
+  #page-visual .page-title h1::after{font-size:28px}
 }
 @media(max-width:380px){
   .visual-cellar{padding:8px}
