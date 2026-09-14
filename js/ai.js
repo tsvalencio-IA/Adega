@@ -1,5 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import { getState } from './store.js';
+import { getApiToken } from './auth.js';
 
 function cellarContextForAI() {
   const state = getState();
@@ -22,9 +23,14 @@ function cellarContextForAI() {
   return { inventory, tastings, wishlist, events };
 }
 
+async function authHeaders() {
+  const token = await getApiToken();
+  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+}
+
 async function request(payload) {
   const response = await fetch(APP_CONFIG.aiEndpoint, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: await authHeaders(),
     body: JSON.stringify(payload)
   });
   const raw = await response.text();
@@ -36,7 +42,8 @@ async function request(payload) {
 
 export async function checkAI() {
   try {
-    const r = await fetch(APP_CONFIG.aiEndpoint, { method: 'GET', cache: 'no-store' });
+    const token = await getApiToken();
+    const r = await fetch(APP_CONFIG.aiEndpoint, { method: 'GET', cache: 'no-store', headers: { Authorization: `Bearer ${token}` } });
     return await r.json();
   } catch (e) { return { ok: false, configured: false, error: e.message }; }
 }
