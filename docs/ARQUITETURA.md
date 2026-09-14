@@ -1,65 +1,55 @@
-# Arquitetura — Adega EID VALÊNCIO PRO v2
+# Arquitetura — Adega EID VALÊNCIO PRO 2.1
 
-## Princípio de compatibilidade
+## Fonte de verdade
 
-O projeto mantém o Firebase original e o documento legado:
+O projeto preserva o Firebase original:
 
-- Projeto Firebase: `valencio-app`
-- Firestore: `adegas/adega-compartilhada`
-- Campo legado preservado: `estoque`
-
-O aplicativo novo **não exige migração destrutiva**. Os vinhos continuam em `estoque` no documento legado. Os recursos avançados ficam em um segundo documento, `adegas/adega-compartilhada-pro-v2`, no **mesmo projeto Firebase**. Essa separação é necessária porque a versão antiga usa `setDoc({ estoque })` sem `merge` e apagaria qualquer campo adicional colocado no documento legado.
-
-## Estrutura de dados
+- projeto: `valencio-app`;
+- documento: `adegas/adega-compartilhada`;
+- inventário: campo `estoque`;
+- dados profissionais: campo `v2` no mesmo documento.
 
 ```text
 adegas/adega-compartilhada
-└── estoque[]                 # fonte de verdade do inventário e compatibilidade antiga
-
-adegas/adega-compartilhada-pro-v2
+├── estoque[]
 └── v2
-    ├── schemaVersion
-    ├── movements[]           # auditoria e movimentações
-    ├── tastings[]            # diário de degustação
-    ├── wishlist[]            # lista de desejos
-    ├── events[]              # refeições/eventos planejados
+    ├── schemaVersion: 3
+    ├── movements[]
+    ├── tastings[]
+    ├── wishlist[]
+    ├── events[]
     └── settings
         ├── profileName
         ├── cellarName
-        ├── shelves[]
-        ├── slotsPerShelf
-        └── cloudinary        # somente cloud name/preset público; nunca API secret
+        ├── layoutMode: single_shelf
+        ├── columns: 5
+        └── cloudinary
 ```
 
-Cada vinho continua contendo `quantity`, mas pode possuir `bottles[]`. A quantidade é mantida sincronizada com as garrafas armazenadas nos fluxos do app novo.
+As gravações PRO usam transações Firestore e `merge`, preservando estoque e metadados profissionais no mesmo commit lógico.
 
-## Concorrência
+## Armário
 
-As gravações feitas pelo app PRO usam transações Firestore lendo o estoque legado e o documento PRO antes de gravar. Isso reduz perda de atualização entre dispositivos PRO. A versão antiga continua tecnicamente capaz de regravar o array inteiro, por isso o recomendado é usar o PRO como interface principal depois do deploy; ainda assim, os dados V2 ficam protegidos em outro documento e não são apagados pelo frontend antigo.
+A localização é por garrafa. A posição é um número positivo e representa a leitura física da prateleira da esquerda para a direita, cinco posições por fileira:
+
+`1–5`, `6–10`, `11–15` e assim por diante.
+
+Na migração, posições legadas A/B/C/D, posições duplicadas e garrafas sem posição são normalizadas. A ordem inicial segue os rótulos em ordem alfabética, correspondente à disposição informada pelo usuário. Mover para uma posição ocupada troca as duas posições.
+
+## Compatibilidade
+
+O sistema lê registros antigos que possuem apenas quantidade. Para cada quantidade disponível, cria a representação de garrafa necessária sem modificar a quantidade oficial. Depois da primeira migração, a estrutura enriquecida é gravada no mesmo `estoque`.
+
+A versão antiga não deve continuar gravando após a migração porque utilizava `setDoc({ estoque })` sem `merge`.
 
 ## Cloudinary
 
-O frontend usa upload **unsigned**, que exige somente `cloudName` e `uploadPreset` público. Nenhum API secret do Cloudinary deve ser colocado no navegador.
-
-A resolução da configuração ocorre nesta ordem:
-
-1. configuração salva em `v2.settings.cloudinary` da própria adega;
-2. cache local do dispositivo;
-3. descoberta de configuração pública no mesmo Firebase (`settings/integrations`, `settings/publicIntegrations`, `integrations/cloudinary`, `config/publicIntegrations`);
-4. configuração manual em Configurações.
+O frontend utiliza upload unsigned com `cloudName` + `uploadPreset`. Nenhum API Secret é colocado no navegador. A configuração é salva em `v2.settings.cloudinary` e também mantida em cache local de recuperação.
 
 ## IA
 
-A chave Gemini não é entregue ao navegador. O frontend chama `/api/ai`, e a função Vercel lê `GEMINI_API_KEY` das Environment Variables.
-
-A IA recebe uma projeção do estoque atual, não o banco inteiro. O prompt força separação entre:
-
-- fatos cadastrados no Firebase;
-- conteúdo reconhecido visualmente no rótulo;
-- conhecimento enológico geral.
-
-Ela não deve completar estoque, quantidade, safra ou posição ausentes.
+A chave Gemini fica somente na Vercel. `/api/ai` recebe uma projeção do estoque e separa dados cadastrados de conhecimento enológico geral.
 
 ## PWA
 
-`manifest.webmanifest` + `sw.js` permitem instalação no Android e cache do shell do aplicativo. Dados continuam vindo do Firestore quando há conexão. O service worker não intercepta `/api/*` nem chamadas externas do Firebase.
+O service worker 2.1 usa cache próprio e inclui os módulos `store-core`, `store-actions`, `store-meta`, `ui-v21` e o CSS do armário físico.
