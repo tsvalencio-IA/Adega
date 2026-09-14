@@ -1,7 +1,7 @@
-const CACHE = 'adega-eid-pro-v2.0.0';
+const CACHE = 'adega-eid-pro-v2.1.0';
 const CORE = [
   './', './index.html', './css/app.css', './js/app.js', './js/config.js', './js/firebase.js',
-  './js/store.js', './js/cloudinary.js', './js/ai.js', './js/utils.js', './manifest.webmanifest',
+  './js/store.js', './js/auth.js', './js/cloudinary.js', './js/ai.js', './js/utils.js', './manifest.webmanifest',
   './assets/icon.svg', './assets/icon-192.png', './assets/icon-512.png', './assets/apple-touch-icon.png'
 ];
 
