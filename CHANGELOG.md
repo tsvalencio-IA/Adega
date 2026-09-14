@@ -1,67 +1,32 @@
-# Alterações — Adega EID VALÊNCIO PRO v2.0.0
+# 2.1.0 — armário real e sincronização PRO
 
-## Preservado
+- remove o modelo genérico de prateleiras A/B/C/D;
+- representa uma única prateleira física em fileiras de cinco posições: 1–5, 6–10, 11–15...;
+- migra automaticamente posições antigas ou vazias sem alterar quantidades;
+- usa a ordem alfabética atual dos rótulos como ordem física inicial informada;
+- novas garrafas ocupam a próxima posição livre;
+- mover uma garrafa para posição ocupada faz troca de posições, evitando duplicidade;
+- edição de posição do rótulo passa a refletir a garrafa disponível;
+- dados PRO (`v2`) e `estoque` passam a sincronizar no mesmo `adegas/adega-compartilhada`;
+- elimina a dependência do documento `adega-compartilhada-pro-v2` e o fallback local causado pelas Rules atuais;
+- mantém funcionamento sem Firebase Authentication, conforme solicitado;
+- Cloudinary manual passa a persistir junto das configurações PRO;
+- painel deixa de expor configurações A/B/C/D que não existem no armário real;
+- PWA atualizada para cache 2.1.0 e novos módulos de dados.
 
-- mesmo projeto Firebase `valencio-app`;
-- mesmo documento de estoque `adegas/adega-compartilhada`;
-- campo `estoque` compatível com a aplicação anterior;
-- cadastro e controle de quantidade;
-- leitura de rótulo por imagem;
-- sommelier, ficha técnica e harmonização;
-- identidade Adega EID VALÊNCIO.
+# 2.0.0 — fundação PRO
 
-## Arquitetura
-
-- `index.html` monolítico substituído por módulos separados;
-- Firestore com transações nas alterações feitas pelo PRO;
-- documento avançado isolado `adegas/adega-compartilhada-pro-v2`;
-- fallback local para recursos PRO caso as Rules ainda não autorizem o segundo documento;
-- chave Gemini removida do frontend;
-- backend `/api/ai` para Vercel;
-- Cloudinary com descoberta no mesmo Firebase e configuração pública persistida;
-- service worker + manifesto PWA;
-- validação automática via GitHub Actions.
-
-## Estoque e adega
-
-- garrafas individuais dentro de cada rótulo;
-- localização por prateleira/posição;
+- dashboard com estoque e indicadores;
+- controle por garrafa;
 - adega visual;
-- entrada/saída auditadas;
-- fluxo Abrir garrafa;
-- favoritos;
-- filtros, pesquisa e ordenação;
-- valor cadastrado do acervo;
-- alerta de estoque baixo;
-- reconciliação automática quando a versão antiga altera somente `quantity`.
+- diário de degustações;
+- wishlist e eventos;
+- Sommelier IA com contexto do estoque;
+- backend Gemini na Vercel;
+- integração Cloudinary;
+- backup JSON e CSV;
+- PWA responsiva.
 
-## Diário
+---
 
-- movimentações;
-- degustações com nota, refeição, ocasião, companhia e observação;
-- wishlist;
-- eventos/refeições planejados;
-- perfil/nome registrado nas movimentações PRO.
-
-## IA
-
-- consulta ao estoque real;
-- contexto de degustações reais;
-- contexto de wishlist e eventos;
-- sugestão de vinho disponível;
-- planejamento de refeição respeitando quantidade disponível;
-- harmonização específica;
-- ficha técnica com separação entre dado cadastrado e conhecimento geral;
-- leitura de rótulo com instrução explícita para não inventar campos ilegíveis;
-- histórico curto de conversa no Sommelier.
-
-## Dados e operação
-
-- backup JSON;
-- restauração confirmada;
-- exportação CSV;
-- diagnóstico de IA;
-- descoberta/teste do Cloudinary;
-- documentação de deploy, arquitetura, segurança e Rules;
-- interface responsiva mobile/desktop;
-- rodapé `Powered by thIAguinho Soluções Digitais`.
+Powered by **thIAguinho Soluções Digitais**
