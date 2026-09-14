@@ -1,6 +1,21 @@
-# Alterações — Adega EID VALÊNCIO PRO v2.0.0
+# Changelog
 
-## Preservado
+## 2.1.0 — Segurança profissional
+
+- Firebase Authentication obrigatório.
+- Login sem cadastro público.
+- Firestore Rules owner-only por UID.
+- Documento `adegaConfig/access` como allowlist de proprietários.
+- API Gemini protegida por token Firebase e autorização Firestore.
+- Auditoria passa a registrar UID/e-mail autenticado quando disponível.
+- `store.js` incluído no repositório oficial.
+- Cache PWA atualizado para 2.1.0.
+- Headers de segurança reforçados na Vercel.
+- Documentação de bootstrap e domínio autorizado.
+
+## 2.0.0 — Adega EID VALÊNCIO PRO
+
+### Preservado
 
 - mesmo projeto Firebase `valencio-app`;
 - mesmo documento de estoque `adegas/adega-compartilhada`;
@@ -10,7 +25,7 @@
 - sommelier, ficha técnica e harmonização;
 - identidade Adega EID VALÊNCIO.
 
-## Arquitetura
+### Arquitetura
 
 - `index.html` monolítico substituído por módulos separados;
 - Firestore com transações nas alterações feitas pelo PRO;
@@ -22,7 +37,7 @@
 - service worker + manifesto PWA;
 - validação automática via GitHub Actions.
 
-## Estoque e adega
+### Estoque e adega
 
 - garrafas individuais dentro de cada rótulo;
 - localização por prateleira/posição;
@@ -35,7 +50,7 @@
 - alerta de estoque baixo;
 - reconciliação automática quando a versão antiga altera somente `quantity`.
 
-## Diário
+### Diário
 
 - movimentações;
 - degustações com nota, refeição, ocasião, companhia e observação;
@@ -43,7 +58,7 @@
 - eventos/refeições planejados;
 - perfil/nome registrado nas movimentações PRO.
 
-## IA
+### IA
 
 - consulta ao estoque real;
 - contexto de degustações reais;
@@ -55,7 +70,7 @@
 - leitura de rótulo com instrução explícita para não inventar campos ilegíveis;
 - histórico curto de conversa no Sommelier.
 
-## Dados e operação
+### Dados e operação
 
 - backup JSON;
 - restauração confirmada;
