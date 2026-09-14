@@ -1,52 +1,37 @@
-# Firestore Rules — compatibilidade
+# Firestore Rules — Adega EID VALÊNCIO PRO 2.1
 
-O código **não altera suas Rules automaticamente**. Isso é intencional: sobrescrever regras existentes poderia quebrar outros projetos que usam o mesmo Firebase `valencio-app`.
-
-A versão PRO usa dois documentos da coleção `adegas`:
+A V2.1 foi ajustada ao uso familiar informado: **sem Firebase Authentication** e utilizando somente o documento já existente.
 
 ```text
 adegas/adega-compartilhada
-adegas/adega-compartilhada-pro-v2
+├── estoque[]
+└── v2
+    ├── settings
+    ├── movements
+    ├── tastings
+    ├── wishlist
+    └── events
 ```
 
-## Se sua regra atual já usa wildcard
+As Rules atuais são suficientes para o funcionamento:
 
-Exemplo estrutural:
-
-```text
-match /adegas/{adegaId} {
-  ...sua regra atual...
+```js
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /adegas/adega-compartilhada {
+      allow read, write: if true;
+    }
+  }
 }
 ```
 
-Nesse caso, o segundo documento normalmente já cai na mesma regra e nenhuma mudança é necessária.
+Não é necessário liberar `adega-compartilhada-pro-v2` e não é necessário criar Authentication.
 
-## Se sua regra libera apenas o documento antigo
+## Segurança
 
-Se existir algo específico como:
+`allow read, write: if true` significa acesso público ao documento para quem conhecer a configuração do Firebase. Isso foi mantido deliberadamente porque a instalação foi definida sem login. Se futuramente a adega deixar de ser exclusivamente familiar, a recomendação é migrar para Authentication + Rules por usuário.
 
-```text
-match /adegas/adega-compartilhada {
-  ...
-}
-```
+## Compatibilidade
 
-copie **a mesma condição de acesso que você já usa** para:
-
-```text
-match /adegas/adega-compartilhada-pro-v2 {
-  ...a mesma condição de acesso aprovada por você...
-}
-```
-
-Não use `allow read, write: if true` apenas para fazer o app funcionar em produção. Como este Firebase pode ser compartilhado com outros projetos, ajuste somente os caminhos necessários e preserve o restante das Rules.
-
-## Fallback automático
-
-Se o documento PRO não puder ser lido/escrito, o aplicativo:
-
-- continua lendo e gravando o `estoque` no documento antigo;
-- mantém diário/configurações avançadas em armazenamento local do navegador;
-- mostra um aviso em Configurações de que os dados PRO não estão sincronizando entre aparelhos.
-
-Assim uma Rule restritiva não impede o uso do estoque atual.
+Use a versão PRO 2.1 como interface principal. O frontend antigo fazia `setDoc({ estoque })` sem `merge` e pode apagar o campo `v2` se voltar a gravar no mesmo documento.
