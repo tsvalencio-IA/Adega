@@ -79,7 +79,7 @@
       </section>
 
       <section id="page-ai" class="page" data-page="ai">
-        <div class="page-title"><div><small>SOMMELIER DA ADEGA</small><h1>Inteligência com contexto real</h1><p>A IA recebe o estoque cadastrado e não pode inventar o que existe na sua adega.</p></div></div>
+        <div class="page-title"><div><small>SOMMELIER DA ADEGA</small><h1>Inteligência com contexto real</h1><p>Dados da adega são respondidos pelo próprio Firebase; a IA generativa entra somente para conhecimento enológico e recomendações.</p></div></div>
         <div class="ai-actions">
           <button class="quick-card" data-action="ai-suggest"><span>✨</span><strong>Escolha ideal</strong><small>Uma opção do estoque para hoje</small></button>
           <button class="quick-card" data-action="open-dinner"><span>🍽</span><strong>Planejar refeição</strong><small>Pratos, pessoas e garrafas disponíveis</small></button>
@@ -88,7 +88,7 @@
           <div id="ai-status" class="ai-status">Verificando backend da IA...</div>
           <div id="chat-messages" class="chat-messages"></div>
           <form id="chat-form" class="chat-form">
-            <input id="chat-input" autocomplete="off" placeholder="Ex.: qual vinho tenho para um churrasco?">
+            <input id="chat-input" autocomplete="off" placeholder="Ex.: quantos Malbec tenho? ou o que combina com chocolate?">
             <button type="submit" aria-label="Enviar">➤</button>
           </form>
         </div>
@@ -115,6 +115,6 @@
   <input id="gallery-input" hidden type="file" accept="image/*">
   <input id="backup-input" hidden type="file" accept="application/json,.json">
 
-  <script type="module" src="./js/app.js"></script>
+  <script type="module" src="./js/bootstrap-v22.js?v=2.2.0"></script>
 </body>
 </html>
