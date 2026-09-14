@@ -22,7 +22,7 @@ Aplicação premium para gestão da adega pessoal, construída a partir da base 
 - planejamento de refeição usando somente rótulos disponíveis;
 - backup JSON, restauração e exportação CSV;
 - PWA instalável no Android;
-- backend Gemini protegido por função serverless na Vercel;
+- backend Gemini protegido por função serverless na Vercel e autenticação Firebase;
 - interface mobile-first e responsiva para celular e computador.
 
 ## Compatibilidade com o projeto antigo
@@ -75,6 +75,7 @@ Veja `docs/DEPLOY.md` para o passo a passo completo.
 ├── js/
 │   ├── ai.js
 │   ├── app.js
+│   ├── auth.js
 │   ├── cloudinary.js
 │   ├── config.js
 │   ├── firebase.js
@@ -84,6 +85,8 @@ Veja `docs/DEPLOY.md` para o passo a passo completo.
 │   └── check.mjs
 ├── .env.example
 ├── .gitignore
+├── firebase.json
+├── firestore.rules
 ├── index.html
 ├── manifest.webmanifest
 ├── package.json
@@ -102,11 +105,19 @@ npm run check
 
 O script verifica arquivos obrigatórios, sintaxe JavaScript, JSON e padrões óbvios de segredo indevidamente versionado. O mesmo teste roda automaticamente no GitHub Actions a cada push em `main`/`master`.
 
+## Segurança profissional — v2.1.0
+
+A versão 2.1.0 adiciona login obrigatório por Firebase Authentication e substitui o modelo público `allow read, write: if true` por autorização individual via UID.
+
+O bootstrap está documentado em [`docs/FIRESTORE-RULES.md`](docs/FIRESTORE-RULES.md). O aplicativo não possui cadastro público; usuários são criados manualmente no Console Firebase e autorizados no documento `adegaConfig/access`.
+
+A API Gemini também valida a sessão e a autorização antes de usar `GEMINI_API_KEY`, reduzindo o risco de terceiros consumirem sua cota da IA.
+
 ## Publicação recomendada
 
 **GitHub privado + Vercel.** A Vercel é necessária para `/api/ai`, onde fica a integração segura com Gemini.
 
-Leia: [`docs/DEPLOY.md`](docs/DEPLOY.md) e [`docs/FIRESTORE-RULES.md`](docs/FIRESTORE-RULES.md).
+Leia: [`docs/DEPLOY.md`](docs/DEPLOY.md), [`docs/FIRESTORE-RULES.md`](docs/FIRESTORE-RULES.md) e [`SECURITY.md`](SECURITY.md).
 
 ---
 
