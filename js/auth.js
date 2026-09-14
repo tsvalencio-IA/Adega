@@ -1,4 +1,4 @@
-import { firebaseApp } from './firebase.js';
+import { firebaseApp, db, doc, getDoc } from './firebase.js';
 import {
   getAuth, setPersistence, browserLocalPersistence, onAuthStateChanged,
   signInWithEmailAndPassword, signOut, sendPasswordResetEmail
@@ -28,6 +28,18 @@ export async function sendReset(email) {
   const cleanEmail = String(email || '').trim().toLowerCase();
   if (!cleanEmail) throw new Error('Informe o e-mail para recuperar a senha.');
   await sendPasswordResetEmail(auth, cleanEmail);
+}
+
+export async function verifyOwnerAccess() {
+  const user = auth.currentUser;
+  if (!user) return { ok: false, reason: 'not-authenticated' };
+  try {
+    const snap = await getDoc(doc(db, 'adegaConfig', 'access'));
+    const owners = snap.exists() && Array.isArray(snap.data()?.ownerUids) ? snap.data().ownerUids.map(String) : [];
+    return { ok: owners.includes(String(user.uid)), reason: owners.includes(String(user.uid)) ? 'authorized' : 'not-listed' };
+  } catch (error) {
+    return { ok: false, reason: error?.code || 'permission-denied', error };
+  }
 }
 
 export async function getApiToken(forceRefresh = false) {
