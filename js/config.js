@@ -1,6 +1,6 @@
 export const APP_CONFIG = {
   appName: 'Adega EID VALÊNCIO',
-  version: '2.0.0',
+  version: '2.1.0',
   adegaId: 'adega-compartilhada',
   metaDocId: 'adega-compartilhada-pro-v2',
   firebase: {
@@ -17,6 +17,10 @@ export const APP_CONFIG = {
     folder: 'adega-eid'
   },
   aiEndpoint: '/api/ai',
+  security: {
+    accessDocument: 'adegaConfig/access',
+    ownerOnly: true
+  },
   defaults: {
     shelves: ['A', 'B', 'C', 'D'],
     slotsPerShelf: 6,
