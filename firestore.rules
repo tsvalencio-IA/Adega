@@ -1,0 +1,49 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function accessPath() {
+      return /databases/$(database)/documents/adegaConfig/access;
+    }
+
+    function isOwner() {
+      return signedIn()
+        && exists(accessPath())
+        && request.auth.uid in get(accessPath()).data.ownerUids;
+    }
+
+    // Documento de autorização. É criado manualmente no Console Firebase.
+    // O próprio cliente não pode alterá-lo.
+    match /adegaConfig/access {
+      allow get: if signedIn() && request.auth.uid in resource.data.ownerUids;
+      allow list, create, update, delete: if false;
+    }
+
+    // Estoque legado — mesma localização usada desde a primeira versão.
+    match /adegas/adega-compartilhada {
+      allow read: if isOwner();
+      allow create, update: if isOwner()
+        && request.resource.data.estoque is list
+        && request.resource.data.estoque.size() <= 1000;
+      allow delete: if false;
+    }
+
+    // Recursos PRO: auditoria, degustações, wishlist, eventos e configurações.
+    match /adegas/adega-compartilhada-pro-v2 {
+      allow read: if isOwner();
+      allow create, update: if isOwner()
+        && request.resource.data.v2 is map;
+      allow delete: if false;
+    }
+
+    // Negação explícita para qualquer outro documento do projeto.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
