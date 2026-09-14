@@ -1,69 +1,109 @@
-# Publicação — novo repositório + Vercel
+# Publicação — Adega EID VALÊNCIO PRO v2.1
 
-## 1. Novo repositório no GitHub
+## Ordem obrigatória
 
-Crie um repositório novo, de preferência **Private**. Envie para a raiz do repositório todo o conteúdo deste ZIP — não envie a pasta externa envolvendo os arquivos.
+A versão 2.1 usa Firebase Authentication e Rules fechadas. **Não publique as novas Rules antes de criar o usuário e o documento de autorização**, ou você poderá bloquear o acesso ao próprio estoque.
 
-Na raiz devem aparecer diretamente `index.html`, `vercel.json`, `package.json`, `api/`, `js/`, `css/` e `assets/`.
+## 1. Firebase Authentication
 
-## 2. Importar na Vercel
+No projeto `valencio-app`:
 
-1. Na Vercel, escolha **Add New → Project**.
-2. Importe o novo repositório.
-3. Framework Preset: **Other**.
-4. Root Directory: raiz do repositório.
-5. Build Command: deixe vazio.
-6. Output Directory: deixe vazio.
-7. Salve o projeto.
+1. Firebase Console → **Authentication → Começar**.
+2. **Sign-in method → E-mail/senha → Ativar**.
+3. **Users → Add user**.
+4. Crie manualmente a conta que terá acesso à adega.
+5. Copie o **UID** dessa conta.
 
-## 3. Gemini — obrigatório para IA
+O aplicativo não possui cadastro público.
 
-Em **Vercel → Project → Settings → Environment Variables**, crie:
+## 2. Documento de autorização
 
-- `GEMINI_API_KEY` = sua chave Gemini atual/rotacionada
-- `GEMINI_MODEL` = `gemini-2.5-flash` (opcional)
-
-Marque Production, Preview e Development se quiser IA em todos os ambientes. Depois faça Redeploy.
-
-> A versão antiga expunha a chave Gemini no JavaScript do navegador. Por segurança, não reutilize uma chave que você considere comprometida: gere/rotacione no Google AI Studio e coloque somente na Vercel.
-
-## 4. Firebase
-
-Nada precisa ser trocado. O projeto já está configurado para o mesmo Firebase `valencio-app` e para `adegas/adega-compartilhada`.
-
-O novo aplicativo preserva o campo `estoque` no documento legado e cria somente um documento adicional no mesmo projeto:
+Antes de fechar as Rules, em Firestore → Dados crie:
 
 ```text
-adegas/adega-compartilhada-pro-v2
+Coleção: adegaConfig
+Documento: access
+Campo: ownerUids
+Tipo: array
+Valor: ["UID_COPIADO_DO_AUTH"]
 ```
 
-Esse segundo documento guarda diário, auditoria, eventos, wishlist e configurações. A separação evita que o `setDoc({ estoque })` da versão antiga apague os recursos PRO.
+Se quiser autorizar outra pessoa, crie também o usuário em Authentication e adicione o UID ao mesmo array.
 
-Se suas Rules atuais autorizam apenas o ID exato `adega-compartilhada`, será necessário autorizar também `adega-compartilhada-pro-v2`. Se elas já usam um wildcard como `match /adegas/{docId}`, normalmente o novo documento entra na mesma regra.
+## 3. Domínio autorizado
 
-## 5. Cloudinary
+Firebase → Authentication → **Settings → Authorized domains**.
 
-O ZIP antigo da adega não continha `cloudName` nem `uploadPreset`, portanto eles não foram inventados.
+Confirme/adicone o domínio usado na produção, por exemplo:
 
-No primeiro acesso:
+```text
+adega-snowy-six.vercel.app
+```
+
+Inclua também um domínio personalizado, se houver.
+
+## 4. Firestore Rules
+
+Abra **Firestore Database → Regras** e publique exatamente o conteúdo de `firestore.rules`.
+
+A partir daí:
+
+- `adegas/adega-compartilhada` deixa de ser público;
+- `adegas/adega-compartilhada-pro-v2` passa a ser owner-only;
+- `adegaConfig/access` só pode ser lido pelo próprio UID autorizado;
+- exclusões dos documentos raiz ficam negadas;
+- qualquer outro caminho do Firestore fica bloqueado por padrão.
+
+## 5. Vercel
+
+O repositório deve permanecer conectado à Vercel com Framework Preset **Other**, raiz do repositório e sem Build Command obrigatório.
+
+Em **Vercel → Project → Settings → Environment Variables**, configure:
+
+```text
+GEMINI_API_KEY=sua_chave_rotacionada
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+`GEMINI_MODEL` é opcional. Depois faça Redeploy.
+
+A API `/api/ai` exige um ID token Firebase e confirma a autorização no Firestore antes de chamar Gemini. Assim um visitante ou um usuário autenticado não autorizado não consegue consumir a chave da IA.
+
+## 6. Cloudinary
+
+O projeto continua compatível com o mesmo Cloudinary. Nenhum `API Secret` deve ficar no frontend.
+
+No primeiro acesso autorizado:
 
 1. Abra ⚙ **Configurações**.
 2. Vá à área Cloudinary.
-3. Toque em **Procurar no Firebase**. O app tenta reaproveitar configuração pública existente no mesmo Firebase.
-4. Se não encontrar, informe os **mesmos** `Cloud name` e `Unsigned upload preset` já usados por você.
-5. Toque em **Testar Cloudinary** e depois em **Salvar**.
+3. Toque em **Procurar no Firebase**; ou informe o mesmo `Cloud name` e o mesmo `Unsigned upload preset` já usados.
+4. Teste o upload.
+5. Salve.
 
-Essa configuração pública passa a ser salva na própria adega e sincroniza com outros dispositivos.
+No Cloudinary, restrinja o unsigned preset por formato de arquivo, tamanho máximo e pasta quando possível.
 
-## 6. Validação rápida depois do deploy
+## 7. Validação de produção
 
 Faça nesta ordem:
 
-1. O contador de garrafas precisa carregar os dados antigos.
-2. Cadastre manualmente 1 vinho de teste e confirme que aparece em outro aparelho.
-3. Altere +1 e -1 e confirme o histórico no Diário.
-4. Configure/teste Cloudinary e fotografe um rótulo.
-5. Abra **Sommelier** e confirme que `/api/ai` aparece configurada.
-6. Instale a PWA pelo navegador Android e abra novamente.
+1. Abra o site deslogado: deve aparecer somente a tela de login.
+2. Entre com uma conta que **não** esteja no `ownerUids`: ela não pode ler o estoque nem usar IA.
+3. Entre com a conta autorizada: o estoque antigo precisa carregar normalmente.
+4. Cadastre um rótulo de teste e confirme sincronização em outro aparelho com a mesma conta/autorização.
+5. Abra/consuma uma garrafa e confira o Diário; a auditoria deve registrar identidade autenticada quando disponível.
+6. Teste leitura de rótulo/Cloudinary.
+7. Teste o Sommelier.
+8. Instale a PWA e confirme novo login/sessão.
 
-Não exclua o repositório antigo nem o Firebase antigo para testar esta versão. Os dois frontends podem ler e alterar o mesmo estoque legado; os recursos PRO ficam isolados no documento adicional. Depois de validar o PRO, use-o como interface principal para que todas as movimentações passem pela auditoria nova.
+## Compatibilidade de dados
+
+O Firebase permanece `valencio-app`.
+
+```text
+Estoque legado: adegas/adega-compartilhada
+Dados PRO:      adegas/adega-compartilhada-pro-v2
+Autorização:    adegaConfig/access
+```
+
+Não há migração destrutiva do estoque.
