@@ -1,69 +1,59 @@
-# Publicação — novo repositório + Vercel
+# Deploy — Adega EID VALÊNCIO PRO 2.1
 
-## 1. Novo repositório no GitHub
+## GitHub + Vercel
 
-Crie um repositório novo, de preferência **Private**. Envie para a raiz do repositório todo o conteúdo deste ZIP — não envie a pasta externa envolvendo os arquivos.
+O repositório já está preparado para deploy pela Vercel com Framework Preset **Other**, raiz do repositório, sem Build Command e sem Output Directory customizado.
 
-Na raiz devem aparecer diretamente `index.html`, `vercel.json`, `package.json`, `api/`, `js/`, `css/` e `assets/`.
+## Gemini
 
-## 2. Importar na Vercel
-
-1. Na Vercel, escolha **Add New → Project**.
-2. Importe o novo repositório.
-3. Framework Preset: **Other**.
-4. Root Directory: raiz do repositório.
-5. Build Command: deixe vazio.
-6. Output Directory: deixe vazio.
-7. Salve o projeto.
-
-## 3. Gemini — obrigatório para IA
-
-Em **Vercel → Project → Settings → Environment Variables**, crie:
-
-- `GEMINI_API_KEY` = sua chave Gemini atual/rotacionada
-- `GEMINI_MODEL` = `gemini-2.5-flash` (opcional)
-
-Marque Production, Preview e Development se quiser IA em todos os ambientes. Depois faça Redeploy.
-
-> A versão antiga expunha a chave Gemini no JavaScript do navegador. Por segurança, não reutilize uma chave que você considere comprometida: gere/rotacione no Google AI Studio e coloque somente na Vercel.
-
-## 4. Firebase
-
-Nada precisa ser trocado. O projeto já está configurado para o mesmo Firebase `valencio-app` e para `adegas/adega-compartilhada`.
-
-O novo aplicativo preserva o campo `estoque` no documento legado e cria somente um documento adicional no mesmo projeto:
+Em **Vercel → Project → Settings → Environment Variables**, mantenha:
 
 ```text
-adegas/adega-compartilhada-pro-v2
+GEMINI_API_KEY=sua_chave
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
-Esse segundo documento guarda diário, auditoria, eventos, wishlist e configurações. A separação evita que o `setDoc({ estoque })` da versão antiga apague os recursos PRO.
+Depois de alterar variável, faça Redeploy.
 
-Se suas Rules atuais autorizam apenas o ID exato `adega-compartilhada`, será necessário autorizar também `adega-compartilhada-pro-v2`. Se elas já usam um wildcard como `match /adegas/{docId}`, normalmente o novo documento entra na mesma regra.
+## Firebase
 
-## 5. Cloudinary
+O projeto continua usando `valencio-app` e somente o documento:
 
-O ZIP antigo da adega não continha `cloudName` nem `uploadPreset`, portanto eles não foram inventados.
+```text
+adegas/adega-compartilhada
+```
 
-No primeiro acesso:
+A V2.1 grava nele tanto `estoque` quanto o bloco `v2`. Portanto, com as Rules atuais do usuário, não existe mais a dependência de `adega-compartilhada-pro-v2` nem o fallback local para configurações/diário.
 
-1. Abra ⚙ **Configurações**.
-2. Vá à área Cloudinary.
-3. Toque em **Procurar no Firebase**. O app tenta reaproveitar configuração pública existente no mesmo Firebase.
-4. Se não encontrar, informe os **mesmos** `Cloud name` e `Unsigned upload preset` já usados por você.
-5. Toque em **Testar Cloudinary** e depois em **Salvar**.
+Não é necessário ativar Firebase Authentication para esta instalação familiar.
 
-Essa configuração pública passa a ser salva na própria adega e sincroniza com outros dispositivos.
+## Armário físico
 
-## 6. Validação rápida depois do deploy
+A disposição é fixa e fiel ao uso real:
 
-Faça nesta ordem:
+```text
+1  2  3  4  5
+6  7  8  9  10
+11 12 13 14 15
+...
+```
 
-1. O contador de garrafas precisa carregar os dados antigos.
-2. Cadastre manualmente 1 vinho de teste e confirme que aparece em outro aparelho.
-3. Altere +1 e -1 e confirme o histórico no Diário.
-4. Configure/teste Cloudinary e fotografe um rótulo.
-5. Abra **Sommelier** e confirme que `/api/ai` aparece configurada.
-6. Instale a PWA pelo navegador Android e abra novamente.
+Ao primeiro carregamento da V2.1, posições antigas A/B/C/D ou ausentes são migradas automaticamente para posições numéricas em ordem alfabética dos rótulos, que corresponde à ordem informada da lista física. Quantidades não são alteradas.
 
-Não exclua o repositório antigo nem o Firebase antigo para testar esta versão. Os dois frontends podem ler e alterar o mesmo estoque legado; os recursos PRO ficam isolados no documento adicional. Depois de validar o PRO, use-o como interface principal para que todas as movimentações passem pela auditoria nova.
+## Cloudinary
+
+No painel ⚙ **Configurações**, informe o mesmo `Cloud name` e `Unsigned upload preset` já usado por você. Salve e use **Testar Cloudinary**. Esses dois valores são configuração pública; não coloque API Secret no navegador.
+
+## Validação pós-deploy
+
+1. confirme que o estoque antigo carregou com a mesma quantidade total;
+2. abra **Armário visual** e confira 1–5 / 6–10 / 11–15;
+3. mova uma garrafa e confirme que a posição sincroniza no outro aparelho;
+4. salve uma alteração em Configurações e confirme no outro aparelho;
+5. teste Cloudinary;
+6. teste Sommelier;
+7. se estiver usando a PWA instalada, feche e abra novamente para o service worker 2.1 substituir o cache antigo.
+
+## Versão antiga
+
+Não use o frontend legado para gravar depois da migração: ele pode sobrescrever o documento apenas com `estoque` e remover o bloco `v2`.
