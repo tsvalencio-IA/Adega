@@ -1,6 +1,7 @@
 import { db, adegaRef, metaRef, doc, getDoc, onSnapshot, runTransaction } from './firebase.js';
 import { APP_CONFIG } from './config.js';
 import { fingerprint, nowISO, safeNumber, uid } from './utils.js';
+import { currentIdentity } from './auth.js';
 
 const LIMITS = { movements: 500, tastings: 250, events: 120, wishlist: 200 };
 const META_LS_KEY = 'adega-eid-pro-v2-local-fallback';
@@ -194,204 +195,4 @@ async function transactLocalFallback(mutator) {
 }
 
 async function transact(mutator) {
-  if (metaMode === 'local') return transactLocalFallback(mutator);
-  try {
-    return await runTransaction(db, async tx => {
-      // Leitura sequencial intencional: todas as leituras acontecem antes das gravaÃ§Ãµes.
-      const legacySnap = await tx.get(adegaRef);
-      const metaSnap = await tx.get(metaRef);
-      const s = normalizeDocument(
-        legacySnap.exists() ? legacySnap.data() : {},
-        metaSnap.exists() ? metaSnap.data() : {}
-      );
-      const result = await mutator(s);
-      s.v2.updatedAt = nowISO();
-      tx.set(adegaRef, legacySerializable(s), { merge: true });
-      tx.set(metaRef, metaSerializable(s), { merge: true });
-      writeLocalMeta(s.v2);
-      return result;
-    });
-  } catch (error) {
-    if (!isMetaPermissionError(error)) throw error;
-    console.warn('[ADEGA] Rules nÃ£o autorizaram documento PRO; operaÃ§Ã£o seguirÃ¡ com V2 local.', error?.code || error?.message);
-    metaMode = 'local';
-    return transactLocalFallback(mutator);
-  }
-}
-
-function actor(s) { return s.v2.settings.profileName || 'UsuÃ¡rio da adega'; }
-function movement(s, data) {
-  s.v2.movements.unshift({ id: uid('mov'), at: nowISO(), actor: actor(s), ...data });
-  s.v2.movements = s.v2.movements.slice(0, LIMITS.movements);
-}
-
-function makeBottle(w, extra = {}) {
-  return normalizeBottle({ id: uid('bottle'), status: 'stored', location: extra.location || w.location || '', purchasePrice: extra.purchasePrice ?? w.purchasePrice, purchaseDate: extra.purchaseDate || w.purchaseDate, purchasePlace: extra.purchasePlace || w.purchasePlace, acquiredAt: nowISO(), ...extra }, w.id, w.bottles.length);
-}
-
-function ensureStoredBottles(w) {
-  const count = w.bottles.filter(b => b.status === 'stored').length;
-  for (let i = count; i < w.quantity; i++) w.bottles.push(makeBottle(w));
-}
-
-export async function addWine(info, quantity = 1) {
-  quantity = Math.max(1, Math.floor(safeNumber(quantity, 1)));
-  return transact(s => {
-    const fp = fingerprint(info);
-    let w = s.wines.find(x => fingerprint(x) === fp && fp.replace(/\|/g, '') !== '');
-    if (w) {
-      w.quantity += quantity; ensureStoredBottles(w);
-      if (!w.imageUrl && info.imageUrl) { w.imageUrl = info.imageUrl; w.imagePublicId = info.imagePublicId || ''; }
-      w.updatedAt = nowISO();
-    } else {
-      w = normalizeWine({ ...info, id: uid('wine'), quantity, createdAt: nowISO(), updatedAt: nowISO(), bottles: [] }, s.wines.length);
-      ensureStoredBottles(w); s.wines.push(w);
-    }
-    movement(s, { type: 'entrada', wineId: w.id, wineName: w.wineName, quantity, detail: 'Entrada de garrafa(s)' });
-    return w.id;
-  });
-}
-
-export async function updateWine(wineId, patch = {}) {
-  return transact(s => {
-    const w = s.wines.find(x => x.id === String(wineId));
-    if (!w) throw new Error('Vinho nÃ£o encontrado.');
-    const oldName = w.wineName;
-    Object.assign(w, patch, { id: w.id, updatedAt: nowISO() });
-    w.quantity = Math.max(0, Math.floor(safeNumber(w.quantity, 0)));
-    ensureStoredBottles(w);
-    movement(s, { type: 'edicao', wineId: w.id, wineName: w.wineName, quantity: 0, detail: oldName === w.wineName ? 'Cadastro atualizado' : `Nome alterado de ${oldName}` });
-  });
-}
-
-export async function adjustQuantity(wineId, delta, details = {}) {
-  delta = Math.trunc(safeNumber(delta, 0));
-  if (!delta) return;
-  return transact(s => {
-    const w = s.wines.find(x => x.id === String(wineId));
-    if (!w) throw new Error('Vinho nÃ£o encontrado.');
-    ensureStoredBottles(w);
-    if (delta > 0) {
-      for (let i = 0; i < delta; i++) w.bottles.push(makeBottle(w, details));
-      w.quantity += delta;
-      movement(s, { type: 'entrada', wineId: w.id, wineName: w.wineName, quantity: delta, detail: details.detail || 'Ajuste positivo de estoque' });
-    } else {
-      const removeCount = Math.min(w.quantity, Math.abs(delta));
-      const stored = w.bottles.filter(b => b.status === 'stored');
-      for (let i = 0; i < removeCount; i++) {
-        const b = stored[stored.length - 1 - i];
-        if (b) { b.status = details.status || 'adjusted_out'; b.openedAt = nowISO(); b.notes = details.detail || b.notes; }
-      }
-      w.quantity -= removeCount;
-      movement(s, { type: details.type || 'saida', wineId: w.id, wineName: w.wineName, quantity: -removeCount, detail: details.detail || 'Ajuste negativo de estoque' });
-    }
-    w.updatedAt = nowISO();
-  });
-}
-
-export async function openBottle(wineId, tasting = null) {
-  return transact(s => {
-    const w = s.wines.find(x => x.id === String(wineId));
-    if (!w || w.quantity <= 0) throw new Error('NÃ£o hÃ¡ garrafa disponÃ­vel deste rÃ³tulo.');
-    ensureStoredBottles(w);
-    const bottle = [...w.bottles].reverse().find(b => b.status === 'stored');
-    if (bottle) { bottle.status = 'consumed'; bottle.openedAt = nowISO(); }
-    w.quantity -= 1; w.updatedAt = nowISO();
-    movement(s, { type: 'consumo', wineId: w.id, wineName: w.wineName, bottleId: bottle?.id || '', quantity: -1, detail: tasting?.food ? `Consumido com ${tasting.food}` : 'Garrafa aberta/consumida' });
-    if (tasting) {
-      s.v2.tastings.unshift({ id: uid('taste'), at: nowISO(), wineId: w.id, wineName: w.wineName, year: w.year || '', rating: Math.max(0, Math.min(5, safeNumber(tasting.rating, 0))), food: tasting.food || '', occasion: tasting.occasion || '', companions: tasting.companions || '', notes: tasting.notes || '', actor: actor(s) });
-      s.v2.tastings = s.v2.tastings.slice(0, LIMITS.tastings);
-    }
-  });
-}
-
-export async function assignBottleLocation(wineId, bottleId, location) {
-  return transact(s => {
-    const w = s.wines.find(x => x.id === String(wineId));
-    if (!w) throw new Error('Vinho nÃ£o encontrado.');
-    ensureStoredBottles(w);
-    const b = w.bottles.find(x => x.id === String(bottleId));
-    if (!b || b.status !== 'stored') throw new Error('Garrafa nÃ£o disponÃ­vel.');
-    const previous = b.location || 'sem posiÃ§Ã£o';
-    b.location = location || '';
-    w.location = w.bottles.find(x => x.status === 'stored' && x.location)?.location || w.location || '';
-    movement(s, { type: 'localizacao', wineId: w.id, wineName: w.wineName, bottleId: b.id, quantity: 0, detail: `${previous} â†’ ${location || 'sem posiÃ§Ã£o'}` });
-  });
-}
-
-export async function toggleFavorite(wineId) {
-  return transact(s => {
-    const w = s.wines.find(x => x.id === String(wineId));
-    if (!w) return;
-    w.favorite = !w.favorite; w.updatedAt = nowISO();
-  });
-}
-
-export async function deleteWine(wineId) {
-  return transact(s => {
-    const i = s.wines.findIndex(x => x.id === String(wineId));
-    if (i < 0) return;
-    const w = s.wines[i];
-    movement(s, { type: 'exclusao', wineId: w.id, wineName: w.wineName, quantity: -w.quantity, detail: 'RÃ³tulo removido da adega' });
-    s.wines.splice(i, 1);
-  });
-}
-
-export async function addWishlist(item) {
-  return transact(s => {
-    s.v2.wishlist.unshift({ id: uid('wish'), createdAt: nowISO(), ...item });
-    s.v2.wishlist = s.v2.wishlist.slice(0, LIMITS.wishlist);
-  });
-}
-export async function removeWishlist(id) { return transact(s => { s.v2.wishlist = s.v2.wishlist.filter(x => x.id !== id); }); }
-
-export async function addEvent(item) {
-  return transact(s => {
-    s.v2.events.unshift({ id: uid('event'), createdAt: nowISO(), status: 'planejado', ...item });
-    s.v2.events = s.v2.events.slice(0, LIMITS.events);
-  });
-}
-export async function removeEvent(id) { return transact(s => { s.v2.events = s.v2.events.filter(x => x.id !== id); }); }
-
-export async function saveSettings(patch) {
-  return transact(s => {
-    const current = s.v2.settings;
-    const next = { ...current, ...patch };
-    if (patch.cloudinary) next.cloudinary = { ...current.cloudinary, ...patch.cloudinary };
-    if (patch.shelves) next.shelves = patch.shelves.filter(Boolean).slice(0, 12);
-    if (patch.slotsPerShelf != null) next.slotsPerShelf = Math.max(1, Math.min(20, Math.floor(safeNumber(patch.slotsPerShelf, current.slotsPerShelf))));
-    s.v2.settings = next;
-  });
-}
-
-export async function replaceFromBackup(backup) {
-  const source = backup?.estoque || backup?.v2 ? backup : (backup?.raw?.legacy || backup?.raw || {});
-  const meta = backup?.v2 ? { v2: backup.v2 } : (backup?.raw?.meta || {});
-  const incoming = normalizeDocument(source, meta);
-  return transact(s => {
-    s.wines = incoming.wines;
-    s.v2 = { ...incoming.v2, updatedAt: nowISO() };
-    movement(s, { type: 'importacao', wineId: '', wineName: '', quantity: 0, detail: 'Backup JSON importado' });
-  });
-}
-
-export function backupObject() { return { exportedAt: nowISO(), appVersion: APP_CONFIG.version, firebaseProject: APP_CONFIG.firebase.projectId, legacyDocument: APP_CONFIG.adegaId, proDocument: APP_CONFIG.metaDocId, estoque: state.wines, v2: state.v2 }; }
-
-export async function discoverCloudinaryFromFirebase() {
-  const paths = [
-    ['settings', 'integrations'], ['settings', 'publicIntegrations'], ['integrations', 'cloudinary'], ['config', 'publicIntegrations']
-  ];
-  for (const [c, id] of paths) {
-    try {
-      const snap = await getDoc(doc(db, c, id));
-      if (!snap.exists()) continue;
-      const raw = snap.data();
-      const v = raw.cloudinary || raw.publicIntegrations?.cloudinary || raw.integrations?.cloudinary || raw;
-      const cloudName = v?.cloudName || v?.cloud_name || '';
-      const uploadPreset = v?.uploadPreset || v?.upload_preset || v?.preset || v?.unsignedPreset || '';
-      const folder = v?.folder || APP_CONFIG.cloudinary.folder;
-      if (cloudName && uploadPreset) return { cloudName, uploadPreset, folder, source: `${c}/${id}` };
-    } catch (e) { console.debug('[ADEGA] Cloudinary discovery', c, id, e?.code || e?.message); }
-  }
-  return null;
-}
+  if (metaMode === 'local') return transactLocalFallback(mutato²È="25™¼¹¥µ…•UÉ°ìÜ¹¥µ…•AÕ‰±¥%€ô¥¹™¼¹¥µ…•AÕ‰±¥%ñğ€œœìô(€€€€€Ü¹ÕÁ‘…Ñ•‘Ğ€ô¹½İ%M< ¤ì(€€€ô•±Í”ì(€€€€€Ü€ô¹½Éµ…±¥é•]¥¹”¡ì€¸¸¹¥¹™¼°¥èÕ¥ İ¥¹”œ¤°ÅÕ…¹Ñ¥Ñä°É•…Ñ•‘Ğè¹½İ%M< ¤°ÕÁ‘…Ñ•‘Ğè¹½İ%M< ¤°‰½ÑÑ±•Ìèmtô°Ì¹İ¥¹•Ì¹±•¹Ñ ¤ì(€€€€€•¹ÍÕÉ•MÑ½É•‘	½ÑÑ±•Ì¡Ü¤ìÌ¹İ¥¹•Ì¹ÁÕÍ ¡Ü¤ì(€€€ô(€€€µ½Ù•µ•¹Ğ¡Ì°ìÑåÁ”è€•¹ÑÉ…‘„œ°İ¥¹•%èÜ¹¥°İ¥¹•9…µ”èÜ¹İ¥¹•9…µ”°ÅÕ…¹Ñ¥Ñä°‘•Ñ…¥°è€¹ÑÉ…‘„‘”…ÉÉ…™„¡Ì¤œô¤ì(€€€É•ÑÕÉ¸Ü¹¥ì(€ô¤ì)ô()•áÁ½ÉĞ…Íå¹Œ™Õ¹Ñ¥½¸ÕÁ‘…Ñ•]¥¹”¡İ¥¹•%°Á…Ñ €ôíô¤ì(€É•ÑÕÉ¸ÑÉ…¹Í…Ğ¡Ì€ôøì(€€€½¹ÍĞÜ€ôÌ¹İ¥¹•Ì¹™¥¹¡à€ôøà¹¥€ôôôMÑÉ¥¹œ¡İ¥¹•%¤¤ì(€€€¥˜€ …Ü¤Ñ¡É½Ü¹•ÜÉÉ½È Y¥¹¡¼»¼•¹½¹ÑÉ…‘¼¸œ¤ì(€€€½¹ÍĞ½±‘9…µ”€ôÜ¹İ¥¹•9…µ”ì(€€€=‰©•Ğ¹…ÍÍ¥¸¡Ü°Á…Ñ °ì¥èÜ¹¥°ÕÁ‘…Ñ•‘Ğè¹½İ%M< ¤ô¤ì(€€€Ü¹ÅÕ…¹Ñ¥Ñä€ô5…Ñ ¹µ…à À°5…Ñ ¹™±½½È¡Í…™•9Õµ‰•È¡Ü¹ÅÕ…¹Ñ¥Ñä°€À¤¤¤ì(€€€•¹ÍÕÉ•MÑ½É•‘	½ÑÑ±•Ì¡Ü¤ì(€€€µ½Ù•µ•¹Ğ¡Ì°ìÑåÁ”è€•‘¥…¼œ°İ¥¹•%èÜ¹¥°İ¥¹•9…µ”èÜ¹İ¥¹•9…µ”°ÅÕ…¹Ñ¥Ñäè€À°‘•Ñ…¥°è½±‘9…µ”€ôôôÜ¹İ¥¹•9…µ”€ü€…‘…ÍÑÉ¼…ÑÕ…±¥é…‘¼œ€è9½µ”…±Ñ•É…‘¼‘”€‘í½±‘9…µ•õ€ô¤ì(€ô¤ì)ô()•áÁ½ÉĞ…Íå¹Œ™Õ¹Ñ¥½¸…‘©ÕÍÑEÕ…¹Ñ¥Ñä¡İ¥¹•%°‘•±Ñ„°‘•Ñ…¥±Ì€ôíô¤ì(€‘•±Ñ„€ô5…Ñ ¹ÑÉÕ¹Œ¡Í…™•9Õµ‰•È¡‘•±Ñ„°€À¤¤ì(€¥˜€ …‘•±Ñ„¤É•ÑÕÉ¸ì(€É•ÑÕÉ¸ÑÉ…¹Í…Ğ¡Ì€ôøì(€€€½¹ÍĞÜ€ôÌ¹İ¥¹•Ì¹™¥¹¡à€ôøà¹¥€ôôôMÑÉ¥¹œ¡İ¥¹•%¤¤ì(€€€¥˜€ …Ü¤Ñ¡É½Ü¹•ÜÉÉ½È Y¥¹¡¼»¼•¹½¹ÑÉ…‘¼¸œ¤ì(€€€•¹ÍÕÉ•MÑ½É•‘	½ÑÑ±•Ì¡Ü¤ì(€€€¥˜€¡‘•±Ñ„€ø€À¤ì(€€€€€™½È€¡±•Ğ¤€ô€Àì¤€ğ‘•±Ñ„ì¤¬¬¤Ü¹‰½ÑÑ±•Ì¹ÁÕÍ ¡µ…­•	½ÑÑ±”¡Ü°‘•Ñ…¥±Ì¤¤ì(€€€€€Ü¹ÅÕ…¹Ñ¥Ñä€¬ô‘•±Ñ„ì(€€€€€µ½Ù•µ•¹Ğ¡Ì°ìÑåÁ”è€•¹ÑÉ…‘„œ°İ¥¹•%èÜ¹¥°İ¥¹•9…µ”èÜ¹İ¥¹•9…µ”°ÅÕ…¹Ñ¥Ñäè‘•±Ñ„°‘•Ñ…¥°è‘•Ñ…¥±Ì¹‘•Ñ…¥°ñğ€©ÕÍÑ”Á½Í¥Ñ¥Ù¼‘”•ÍÑ½ÅÕ”œô¤ì(€€€ô•±Í”ì(€€€€€½¹ÍĞÉ•µ½Ù•½Õ¹Ğ€ô5…Ñ ¹µ¥¸¡Ü¹ÅÕ…¹Ñ¥Ñä°5…Ñ ¹…‰Ì¡‘•±Ñ„¤¤ì(€€€€€½¹ÍĞÍÑ½É•€ôÜ¹‰½ÑÑ±•Ì¹™¥±Ñ•È¡ˆ€ôøˆ¹ÍÑ…ÑÕÌ€ôôô€ÍÑ½É•œ¤ì(€€€€€™½È€¡±•Ğ¤€ô€Àì¤€ğÉ•µ½Ù•½Õ¹Ğì¤¬¬¤ì(€€€€€€€½¹ÍĞˆ€ôÍÑ½É•‘mÍÑ½É•¹±•¹Ñ €´€Ä€´¥tì(€€€€€€€¥˜€¡ˆ¤ìˆ¹ÍÑ…ÑÕÌ€ô‘•Ñ…¥±Ì¹ÍÑ…ÑÕÌñğ€…‘©ÕÍÑ•‘}½ÕĞœìˆ¹½Á•¹•‘Ğ€ô¹½İ%M< ¤ìˆ¹¹½Ñ•Ì€ô‘•Ñ…¥±Ì¹‘•Ñ…¥°ñğˆ¹¹½Ñ•Ììô(€€€€€ô(€€€€€Ü¹ÅÕ…¹Ñ¥Ñä€´ôÉ•µ½Ù•½Õ¹Ğì(€€€€€µ½Ù•µ•¹Ğ¡Ì°ìÑåÁ”è‘•Ñ…¥±Ì¹ÑåÁ”ñğ€Í…¥‘„œ°İ¥¹•%èÜ¹¥°İ¥¹•9…µ”èÜ¹İ¥¹•9…µ”°ÅÕ…¹Ñ¥Ñäè€µÉ•µ½Ù•½Õ¹Ğ°‘•Ñ…¥°è‘•Ñ…¥±Ì¹‘•Ñ…¥°ñğ€©ÕÍÑ”¹•…Ñ¥Ù¼‘”•ÍÑ½ÅÕ”œô¤ì(€€€ô(€€€Ü¹ÕÁ‘…Ñ•‘Ğ€ô¹½İ%M< ¤ì(€ô¤ì)ô()•áÁ½ÉĞ…Íå¹Œ™Õ¹Ñ¥½¸½Á•¹	½ÑÑ±”¡İ¥¹•%°Ñ…ÍÑ¥¹œ€ô¹Õ±°¤ì(€É•ÑÕÉ¸ÑÉ…¹Í…Ğ¡Ì€ôøì(€€€½¹ÍĞÜ€ôÌ¹İ¥¹•Ì¹™¥¹¡à€ôøà¹¥€ôôôMÑÉ¥¹œ¡İ¥¹•%¤¤ì(€€€¥˜€ …ÜñğÜ¹ÅÕ…¹Ñ¥Ñä€ğô€À¤Ñ¡É½Ü¹•ÜÉÉ½È ;¼£„…ÉÉ…™„‘¥ÍÁ½»µÙ•°‘•ÍÑ”ËÍÑÕ±¼¸œ¤ì(€€€•¹ÍÕÉ•MÑ½É•‘	½ÑÑ±•Ì¡Ü¤ì(€€€½¹ÍĞ‰½ÑÑ±”€ôl¸¸¹Ü¹‰½ÑÑ±•Ít¹É•Ù•ÉÍ” ¤¹™¥¹¡ˆ€ôøˆ¹ÍÑ…ÑÕÌ€ôôô€ÍÑ½É•œ¤ì(€€€¥˜€¡‰½ÑÑ±”¤ì‰½ÑÑ±”¹ÍÑ…ÑÕÌ€ô€½¹ÍÕµ•œì‰½ÑÑ±”¹½Á•¹•‘Ğ€ô¹½İ%M< ¤ìô(€€€Ü¹ÅÕ…¹Ñ¥Ñä€´ô€ÄìÜ¹ÕÁ‘…Ñ•‘Ğ€ô¹½İ%M< ¤ì(€€€µ½Ù•µ•¹Ğ¡Ì°ìÑåÁ”è€½¹ÍÕµ¼œ°İ¥¹•%èÜ¹¥°İ¥¹•9…µ”èÜ¹İ¥¹•9…µ”°‰½ÑÑ±•%è‰½ÑÑ±”ü¹¥ñğ€œœ°ÅÕ…¹Ñ¥Ñäè€´Ä°‘•Ñ…¥°èÑ…ÍÑ¥¹œü¹™½½€ü½¹ÍÕµ¥‘¼½´€‘íÑ…ÍÑ¥¹œ¹™½½‘õ€€è€…ÉÉ…™„…‰•ÉÑ„½½¹ÍÕµ¥‘„œô¤ì(€€€¥˜€¡Ñ…ÍÑ¥¹œ¤ì(€€€€€Ì¹ØÈ¹Ñ…ÍÑ¥¹Ì¹Õ¹Í¡¥™Ğ¡ì¥èÕ¥ Ñ…ÍÑ”œ¤°…Ğè¹½İ%M< ¤°İ¥¹•%èÜ¹¥°İ¥¹•9…µ”èÜ¹İ¥¹•9…µ”°å•…ÈèÜ¹å•…Èñğ€œœ°É…Ñ¥¹œè5…Ñ ¹µ…à À°5…Ñ ¹µ¥¸ Ô°Í…™•9Õµ‰•È¡Ñ…ÍÑ¥¹œ¹É…Ñ¥¹œ°€À¤¤¤°™½½èÑ…ÍÑ¥¹œ¹™½½ñğ€œœ°½…Í¥½¸èÑ…ÍÑ¥¹œ¹½…Í¥½¸ñğ€œœ°½µÁ…¹¥½¹ÌèÑ…ÍÑ¥¹œ¹½µÁ…¹¥½¹Ìñğ€œœ°¹½Ñ•ÌèÑ…ÍÑ¥¹œ¹¹½Ñ•Ìñğ€œœ°€¸¸¹…Ñ½É%‘•¹Ñ¥Ñä¡Ì¤ô¤ì(€€€€€Ì¹ØÈ¹Ñ…ÍÑ¥¹Ì€ôÌ¹ØÈ¹Ñ…ÍÑ¥¹Ì¹Í±¥” À°1%5%QL¹Ñ…ÍÑ¥¹Ì¤ì(€€€ô(€ô¤ì)ô()•áÁ½ÉĞ…Íå¹Œ™Õ¹Ñ¥½¸…ÍÍ¥¹	½ÑÑ±•1½…Ñ¥½¸¡İ¥¹•%°‰½ÑÑ±•%°±½…Ñ¥½¸¤ì(€É•ÑÕÉ¸ÑÉ…¹Í…Ğ¡Ì€ôøì(€€€½¹ÍĞÜ€ôÌ¹İ¥¹•Ì¹™¥¹¡à€ôøà¹¥€ôôôMÑÉ¥¹œ¡İ¥¹•%¤¤ì(€€€¥˜€ …Ü¤Ñ¡É½Ü¹•ÜÉÉ½È Y¥¹¡¼»¼•¹½¹ÑÉ…‘¼¸œ¤ì(€€€•¹ÍÕÉ•MÑ½É•‘	½ÑÑ±•Ì¡Ü¤ì(€€€½¹ÍĞˆ€ôÜ¹‰½ÑÑ±•Ì¹™¥¹¡à€ôøà¹¥€ôôôMÑÉ¥¹œ¡‰½ÑÑ±•%¤¤ì(€€€¥˜€ …ˆñğˆ¹ÍÑ…ÑÕÌ€„ôô€ÍÑ½É•œ¤Ñ¡É½Ü¹•ÜÉÉ½È …ÉÉ…™„»¼‘¥ÍÁ½»µÙ•°¸œ¤ì(€€€½¹ÍĞÁÉ•Ù¥½ÕÌ€ôˆ¹±½…Ñ¥½¸ñğ€Í•´Á½Í§Ÿ¼œì(€€€ˆ¹±½…Ñ¥½¸€ô±½…Ñ¥½¸ñğ€œœì(€€€Ü¹±½…Ñ¥½¸€ôÜ¹‰½ÑÑ±•Ì¹™¥¹¡à€ôøà¹ÍÑ…ÑÕÌ€ôôô€ÍÑ½É•œ€˜˜à¹±½…Ñ¥½¸¤ü¹±½…Ñ¥½¸ñğÜ¹±½…Ñ¥½¸ñğ€œœì(€€€µ½Ù•µ•¹Ğ¡Ì°ìÑåÁ”è€±½…±¥é……¼œ°İ¥¹•%èÜ¹¥°İ¥¹•9…µ”èÜ¹İ¥¹•9…µ”°‰½ÑÑ±•%èˆ¹¥°ÅÕ…¹Ñ¥Ñäè€À°‘•Ñ…¥°è€‘íÁÉ•Ù¥½ÕÍôƒŠH€‘í±½…Ñ¥½¸ñğ€Í•´Á½Í§Ÿ¼õ€ô¤ì(€ô¤ì)ô()•áÁ½ÉĞ…Íå¹Œ™Õ¹Ñ¥½¸Ñ½±•…Ù½É¥Ñ”¡İ¥¹•%¤ì(€É•ÑÕÉ¸ÑÉ…¹Í…Ğ¡Ì€ôøì(€€€½¹ÍĞÜ€ôÌ¹İ¥¹•Ì¹™¥¹¡à€ôøà¹¥€ôôôMÑÉ¥¹œ¡İ¥¹•%¤¤ì(€€€¥˜€ …Ü¤É•ÑÕÉ¸ì(€€€Ü¹™…Ù½É¥Ñ”€ô€…Ü¹™…Ù½É¥Ñ”ìÜ¹ÕÁ‘…Ñ•‘Ğ€ô¹½İ%M< ¤ì(€ô¤ì)ô()•áÁ½ÉĞ…Íå¹Œ™Õ¹Ñ¥½¸‘•±•Ñ•]¥¹”¡İ¥¹•%¤ì(€É•ÑÕÉ¸ÑÉ…¹Í…Ğ¡Ì€ôøì(€€€½¹ÍĞ¤€ôÌ¹İ¥¹•Ì¹™¥¹‘%¹‘•à¡à€ôøà¹¥€ôôôMÑÉ¥¹œ¡İ¥¹•%¤¤ì(€€€¥˜€¡¤€ğ€À¤É•ÑÕÉ¸ì(€€€½¹ÍĞÜ€ôÌ¹İ¥¹•Ím¥tì(€€€µ½Ù•µ•¹Ğ¡Ì°ìÑåÁ”è€•á±ÕÍ…¼œ°İ¥¹•%èÜ¹¥°İ¥¹•9…µ”èÜ¹İ¥¹•9…µ”°ÅÕ…¹Ñ¥Ñäè€µÜ¹ÅÕ…¹Ñ¥Ñä°‘•Ñ…¥°è€KÍÑÕ±¼É•µ½Ù¥‘¼‘„…‘•„œô¤ì(€€€Ì¹İ¥¹•Ì¹ÍÁ±¥”¡¤°€Ä¤ì(€ô¤ì)ô()•áÁ½ÉĞ…Íå¹Œ™Õ¹Ñ¥½¸…‘‘]¥Í¡±¥ÍĞ¡¥Ñ•´¤ì(€É•ÑÕÉ¸ÑÉ…¹Í…Ğ¡Ì€ôøì(€€€Ì¹ØÈ¹İ¥Í¡±¥ÍĞ¹Õ¹Í¡¥™Ğ¡ì¥èÕ¥ İ¥Í œ¤°É•…Ñ•‘Ğè¹½İ%M< ¤°€¸¸¹¥Ñ•´ô¤ì(€€€Ì¹ØÈ¹İ¥Í¡±¥ÍĞ€ôÌ¹ØÈ¹İ¥Í¡±¥ÍĞ¹Í±¥” À°1%5%QL¹İ¥Í¡±¥ÍĞ¤ì(€ô¤ì)ô)•áÁ½ÉĞ…Íå¹Œ™Õ¹Ñ¥½¸É•µ½Ù•]¥Í¡±¥ÍĞ¡¥¤ìÉ•ÑÕÉ¸ÑÉ…¹Í…Ğ¡Ì€ôøìÌ¹ØÈ¹İ¥Í¡±¥ÍĞ€ôÌ¹ØÈ¹İ¥Í¡±¥ÍĞ¹™¥±Ñ•È¡à€ôøà¹¥€„ôô¥¤ìô¤ìô()•áÁ½ÉĞ…Íå¹Œ™Õ¹Ñ¥½¸…‘‘Ù•¹Ğ¡¥Ñ•´¤ì(€É•ÑÕÉ¸ÑÉ…¹Í…Ğ¡Ì€ôøì(€€€Ì¹ØÈ¹•Ù•¹ÑÌ¹Õ¹Í¡¥™Ğ¡ì¥èÕ¥ •Ù•¹Ğœ¤°É•…Ñ•‘Ğè¹½İ%M< ¤°ÍÑ…ÑÕÌè€Á±…¹•©…‘¼œ°€¸¸¹¥Ñ•´ô¤ì(€€€Ì¹ØÈ¹•Ù•¹ÑÌ€ôÌ¹ØÈ¹•Ù•¹ÑÌ¹Í±¥” À°1%5%QL¹•Ù•¹ÑÌ¤ì(€ô¤ì)ô)•áÁ½ÉĞ…Íå¹Œ™Õ¹Ñ¥½¸É•µ½Ù•Ù•¹Ğ¡¥¤ìÉ•ÑÕÉ¸ÑÉ…¹Í…Ğ¡Ì€ôøìÌ¹ØÈ¹•Ù•¹ÑÌ€ôÌ¹ØÈ¹•Ù•¹ÑÌ¹™¥±Ñ•È¡à€ôøà¹¥€„ôô¥¤ìô¤ìô()•áÁ½ÉĞ…Íå¹Œ™Õ¹Ñ¥½¸Í…Ù•M•ÑÑ¥¹Ì¡Á…Ñ ¤ì(€É•ÑÕÉ¸ÑÉ…¹Í…Ğ¡Ì€ôøì(€€€½¹ÍĞÕÉÉ•¹Ğ€ôÌ¹ØÈ¹Í•ÑÑ¥¹Ìì(€€€½¹ÍĞ¹•áĞ€ôì€¸¸¹ÕÉÉ•¹Ğ°€¸¸¹Á…Ñ ôì(€€€¥˜€¡Á…Ñ ¹±½Õ‘¥¹…Éä¤¹•áĞ¹±½Õ‘¥¹…Éä€ôì€¸¸¹ÕÉÉ•¹Ğ¹±½Õ‘¥¹…Éä°€¸¸¹Á…Ñ ¹±½Õ‘¥¹…Éäôì(€€€¥˜€¡Á…Ñ ¹Í¡•±Ù•Ì¤¹•áĞ¹Í¡•±Ù•Ì€ôÁ…Ñ ¹Í¡•±Ù•Ì¹™¥±Ñ•È¡	½½±•…¸¤¹Í±¥” À°€ÄÈ¤ì(€€€¥˜€¡Á…Ñ ¹Í±½ÑÍA•ÉM¡•±˜€„ô¹Õ±°¤¹•áĞ¹Í±½ÑÍA•ÉM¡•±˜€ô5…Ñ ¹µ…à Ä°5…Ñ ¹µ¥¸ ÈÀ°5…Ñ ¹™±½½È¡Í…™•9Õµ‰•È¡Á…Ñ ¹Í±½ÑÍA•ÉM¡•±˜°ÕÉÉ•¹Ğ¹Í±½ÑÍA•ÉM¡•±˜¤¤¤¤ì(€€€Ì¹ØÈ¹Í•ÑÑ¥¹Ì€ô¹•áĞì(€ô¤ì)ô()•áÁ½ÉĞ…Íå¹Œ™Õ¹Ñ¥½¸É•Á±…•É½µ	…­ÕÀ¡‰…­ÕÀ¤ì(€½¹ÍĞÍ½ÕÉ”€ô‰…­ÕÀü¹•ÍÑ½ÅÕ”ñğ‰…­ÕÀü¹ØÈ€ü‰…­ÕÀ€è€¡‰…­ÕÀü¹É…Üü¹±•…äñğ‰…­ÕÀü¹É…Üñğíô¤ì(€½¹ÍĞµ•Ñ„€ô‰…­ÕÀü¹ØÈ€üìØÈè‰…­ÕÀ¹ØÈô€è€¡‰…­ÕÀü¹É…Üü¹µ•Ñ„ñğíô¤ì(€½¹ÍĞ¥¹½µ¥¹œ€ô¹½Éµ…±¥é•½Õµ•¹Ğ¡Í½ÕÉ”°µ•Ñ„¤ì(€É•ÑÕÉ¸ÑÉ…¹Í…Ğ¡Ì€ôøì(€€€Ì¹İ¥¹•Ì€ô¥¹½µ¥¹œ¹İ¥¹•Ìì(€€€Ì¹ØÈ€ôì€¸¸¹¥¹½µ¥¹œ¹ØÈ°ÕÁ‘…Ñ•‘Ğè¹½İ%M< ¤ôì(€€€µ½Ù•µ•¹Ğ¡Ì°ìÑåÁ”è€¥µÁ½ÉÑ……¼œ°İ¥¹•%è€œœ°İ¥¹•9…µ”è€œœ°ÅÕ…¹Ñ¥Ñäè€À°‘•Ñ…¥°è€	…­ÕÀ)M=8¥µÁ½ÉÑ…‘¼œô¤ì(€ô¤ì)ô()•áÁ½ÉĞ™Õ¹Ñ¥½¸‰…­ÕÁ=‰©•Ğ ¤ìÉ•ÑÕÉ¸ì•áÁ½ÉÑ•‘Ğè¹½İ%M< ¤°…ÁÁY•ÉÍ¥½¸èAA}=9%¹Ù•ÉÍ¥½¸°™¥É•‰…Í•AÉ½©•ĞèAA}=9%¹™¥É•‰…Í”¹ÁÉ½©•Ñ%°±•…å½Õµ•¹ĞèAA}=9%¹…‘•…%°ÁÉ½½Õµ•¹ĞèAA}=9%¹µ•Ñ…½%°•ÍÑ½ÅÕ”èÍÑ…Ñ”¹İ¥¹•Ì°ØÈèÍÑ…Ñ”¹ØÈôìô()•áÁ½ÉĞ…Íå¹Œ™Õ¹Ñ¥½¸‘¥Í½Ù•É±½Õ‘¥¹…ÉåÉ½µ¥É•‰…Í” ¤ì(€½¹ÍĞÁ…Ñ¡Ì€ôl(€€€lÍ•ÑÑ¥¹Ìœ°€¥¹Ñ•É…Ñ¥½¹Ìt°lÍ•ÑÑ¥¹Ìœ°€ÁÕ‰±¥%¹Ñ•É…Ñ¥½¹Ìt°l¥¹Ñ•É…Ñ¥½¹Ìœ°€±½Õ‘¥¹…Éät°l½¹™¥œœ°€ÁÕ‰±¥%¹Ñ•É…Ñ¥½¹Ìt(€tì(€™½È€¡½¹ÍĞmŒ°¥‘t½˜Á…Ñ¡Ì¤ì(€€€ÑÉäì(€€€€€½¹ÍĞÍ¹…À€ô…İ…¥Ğ•Ñ½Œ¡‘½Œ¡‘ˆ°Œ°¥¤¤ì(€€€€€¥˜€ …Í¹…À¹•á¥ÍÑÌ ¤¤½¹Ñ¥¹Õ”ì(€€€€€½¹ÍĞÉ…Ü€ôÍ¹…À¹‘…Ñ„ ¤ì(€€€€€½¹ÍĞØ€ôÉ…Ü¹±½Õ‘¥¹…ÉäñğÉ…Ü¹ÁÕ‰±¥%¹Ñ•É…Ñ¥½¹Ìü¹±½Õ‘¥¹…ÉäñğÉ…Ü¹¥¹Ñ•É…Ñ¥½¹Ìü¹±½Õ‘¥¹…ÉäñğÉ…Üì(€€€€€½¹ÍĞ±½Õ‘9…µ”€ôØü¹±½Õ‘9…µ”ñğØü¹±½Õ‘}¹…µ”ñğ€œœì(€€€€€½¹ÍĞÕÁ±½…‘AÉ•Í•Ğ€ôØü¹ÕÁ±½…‘AÉ•Í•ĞñğØü¹ÕÁ±½…‘}ÁÉ•Í•ĞñğØü¹ÁÉ•Í•ĞñğØü¹Õ¹Í¥¹•‘AÉ•Í•Ğñğ€œœì(€€€€€½¹ÍĞ™½±‘•È€ôØü¹™½±‘•ÈñğAA}=9%¹±½Õ‘¥¹…Éä¹™½±‘•Èì(€€€€€¥˜€¡±½Õ‘9…µ”€˜˜ÕÁ±½…‘AÉ•Í•Ğ¤É•ÑÕÉ¸ì±½Õ‘9…µ”°ÕÁ±½…‘AÉ•Í•Ğ°™½±‘•È°Í½ÕÉ”è€‘íô¼‘í¥‘õ€ôì(€€€ô…Ñ €¡”¤ì½¹Í½±”¹‘•‰Õœ mt±½Õ‘¥¹…Éä‘¥Í½Ù•Éäœ°Œ°¥°”ü¹½‘”ñğ”ü¹µ•ÍÍ…”¤ìô(€ô(€É•ÑÕÉ¸¹Õ±°ì)ô(
