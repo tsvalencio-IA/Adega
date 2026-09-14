@@ -1,1 +1,0 @@
-Deploy da main atual com backend Gemini atualizado.

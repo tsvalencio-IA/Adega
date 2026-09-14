@@ -1,7 +1,5 @@
-const RAW_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || process.env.GEMINI_MODEL || '';
-const RAW_VISION_MODEL = process.env.GEMINI_VISION_MODEL || '';
-const TEXT_MODEL = !RAW_TEXT_MODEL || RAW_TEXT_MODEL === 'gemini-2.5-flash-lite' ? 'gemini-3.5-flash-lite' : RAW_TEXT_MODEL;
-const VISION_MODEL = !RAW_VISION_MODEL || RAW_VISION_MODEL === 'gemini-2.5-flash' ? 'gemini-3.5-flash' : RAW_VISION_MODEL;
+const TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
+const VISION_MODEL = process.env.GEMINI_VISION_MODEL || 'gemini-2.5-flash';
 const API_KEYS = [process.env.GEMINI_API_KEY, process.env.GOOGLE_GENERATIVE_AI_KEY, process.env.GEMINI_API_KEY_2].filter(Boolean);
 
 function send(res, status, body) {
